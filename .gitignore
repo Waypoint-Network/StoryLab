@@ -1,0 +1,9 @@
+curation.db
+output/briefs/
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+*.egg-info/
+.env

@@ -1,0 +1,839 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>StoryLab — Curation Dashboard</title>
+<style>
+  :root {
+    --navy:    #0D1B3E;
+    --amber:   #E8A020;
+    --cream:   #F8F6F1;
+    --green:   #1A6B3A;
+    --purple:  #5E1B8C;
+    --red:     #8B2020;
+    --gray:    #E8E6E1;
+    --text:    #1A1A2E;
+    --muted:   #888;
+    --saved:   #1565C0;
+    --archive: #6B6B6B;
+    --score5:  #1A6B3A;
+    --score4:  #2E7D32;
+    --score3:  #F57F17;
+    --score2:  #BF360C;
+    --score1:  #9E9E9E;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Inter", system-ui, sans-serif; background: var(--cream); color: var(--text); font-size: 14px; }
+
+  /* ── Header ── */
+  header {
+    background: var(--navy); color: #fff; padding: 12px 24px;
+    display: flex; align-items: center; justify-content: space-between;
+    position: sticky; top: 0; z-index: 100; box-shadow: 0 2px 8px rgba(0,0,0,.3);
+  }
+  header .logo { font-size: 18px; font-weight: 700; letter-spacing: .03em; }
+  header .logo span { color: var(--amber); }
+  header .config-badge {
+    font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 12px;
+    background: rgba(255,255,255,.12); color: rgba(255,255,255,.8); letter-spacing: .06em;
+    text-transform: uppercase; margin-left: 12px;
+  }
+  header .meta { font-size: 12px; color: rgba(255,255,255,.55); }
+
+  /* ── Stats bar ── */
+  #statsBar {
+    background: var(--navy); border-top: 1px solid rgba(255,255,255,.08);
+    padding: 8px 24px; display: flex; gap: 24px; flex-wrap: wrap;
+  }
+  .stat { color: rgba(255,255,255,.7); font-size: 12px; }
+  .stat strong { color: #fff; font-size: 16px; margin-right: 4px; }
+  .stat.highlight-amber strong { color: var(--amber); }
+  .stat.highlight-blue  strong { color: #64B5F6; }
+  .stat.highlight-green strong { color: #81C784; }
+  .stat.highlight-gray  strong { color: #aaa; }
+
+  /* ── Controls ── */
+  #controls {
+    padding: 10px 24px; background: #fff; border-bottom: 1px solid var(--gray);
+    display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
+  }
+  #timeRow {
+    width: 100%; display: flex; gap: 6px; align-items: center;
+    padding-bottom: 8px; border-bottom: 1px solid var(--gray); margin-bottom: 2px;
+  }
+  #timeRow span { font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .07em; color: var(--muted); margin-right: 4px; }
+  .filter-group { display: flex; gap: 6px; flex-wrap: wrap; }
+  .filter-btn {
+    padding: 5px 14px; border-radius: 20px; border: 1.5px solid var(--gray);
+    background: #fff; cursor: pointer; font-size: 12px; font-weight: 500;
+    transition: all .15s;
+  }
+  .filter-btn.active { background: var(--navy); color: #fff; border-color: var(--navy); }
+  .filter-btn:hover:not(.active) { border-color: var(--navy); color: var(--navy); }
+  .filter-btn.time-btn.active { background: var(--amber); border-color: var(--amber); color: var(--navy); }
+  .filter-btn.leaders-btn { border-color: var(--green); color: var(--green); }
+  .filter-btn.leaders-btn.active { background: var(--green); border-color: var(--green); color: #fff; }
+  .search-box {
+    padding: 6px 12px; border: 1.5px solid var(--gray); border-radius: 20px;
+    font-size: 13px; width: 220px; outline: none;
+  }
+  .search-box:focus { border-color: var(--amber); }
+  .bulk-btn {
+    padding: 6px 12px; border-radius: 6px; border: none;
+    background: var(--amber); color: var(--navy); font-weight: 700;
+    font-size: 11px; cursor: pointer; white-space: nowrap;
+  }
+  .bulk-btn:hover { background: #d4910d; }
+  .bulk-btn.save-btn { background: #E8F0FE; color: var(--saved); border: 1.5px solid #c0d0f0; }
+  .bulk-btn.save-btn:hover { background: #d0e0ff; }
+  .bulk-btn.skip-btn { background: #f0f0f0; color: #666; }
+  .bulk-btn.skip-btn:hover { background: #e0e0e0; }
+  .export-btn {
+    padding: 6px 12px; border-radius: 6px; border: 1.5px solid var(--navy);
+    background: var(--navy); color: #fff; font-weight: 700; font-size: 11px; cursor: pointer; white-space: nowrap;
+  }
+  .compose-btn {
+    padding: 6px 12px; border-radius: 6px; border: 1.5px solid var(--green);
+    background: var(--green); color: #fff; font-weight: 700; font-size: 11px; cursor: pointer; white-space: nowrap;
+  }
+  .compose-btn:hover { background: #145a2f; }
+  #checkedCount { font-size: 12px; color: var(--muted); margin-left: auto; white-space: nowrap; }
+
+  /* ── Article grid ── */
+  #articles {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 12px; padding: 16px 24px;
+    max-height: calc(100vh - 220px); overflow-y: auto;
+  }
+
+  /* ── Card ── */
+  .card {
+    background: #fff; border-radius: 10px;
+    border: 2px solid transparent;
+    box-shadow: 0 1px 4px rgba(0,0,0,.07);
+    padding: 14px 16px;
+    transition: border-color .15s, box-shadow .15s;
+    position: relative;
+  }
+  .card:hover { box-shadow: 0 3px 12px rgba(0,0,0,.12); }
+  .card.in_queue  { border-color: var(--amber); background: #FFFBF0; }
+  .card.saved     { border-color: #B8D4F0; background: #F6FAFF; }
+  .card.archived  { border-color: #ddd; background: #FAFAFA; opacity: .75; }
+  .card.skipped   { opacity: .4; }
+  .card.score-5   { box-shadow: 0 0 0 1px rgba(26,107,58,.25), 0 1px 4px rgba(0,0,0,.07); }
+
+  .card-check {
+    position: absolute; top: 10px; right: 10px;
+    width: 18px; height: 18px; border-radius: 4px;
+    border: 2px solid var(--gray); background: #fff;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; flex-shrink: 0;
+  }
+  .card-check.on { background: var(--amber); border-color: var(--amber); }
+  .card-check.on::after { content: "✓"; font-size: 11px; color: #fff; font-weight: 700; }
+
+  .card-source {
+    font-size: 10px; font-weight: 700; letter-spacing: .08em;
+    text-transform: uppercase; margin-bottom: 6px; padding-right: 28px;
+    display: flex; align-items: center; flex-wrap: wrap; gap: 4px;
+  }
+  .cat-badge {
+    display: inline-block; padding: 1px 7px; border-radius: 10px;
+    background: var(--cream); color: var(--navy);
+    font-size: 9px; text-transform: none; letter-spacing: 0; font-weight: 500;
+  }
+  .score-badge {
+    display: inline-flex; align-items: center; gap: 2px;
+    padding: 1px 7px; border-radius: 10px;
+    font-size: 9px; font-weight: 700; text-transform: none; letter-spacing: 0;
+  }
+  .score-5 .score-badge { background: #E8F5E9; color: var(--score5); }
+  .score-4 .score-badge { background: #E8F5E9; color: var(--score4); }
+  .score-3 .score-badge { background: #FFF8E1; color: var(--score3); }
+  .score-2 .score-badge { background: #FBE9E7; color: var(--score2); }
+  .score-1 .score-badge { background: #F5F5F5; color: var(--score1); }
+  .story-type-badge {
+    display: inline-block; padding: 1px 7px; border-radius: 10px;
+    background: #EDE7F6; color: var(--purple);
+    font-size: 9px; text-transform: none; letter-spacing: 0; font-weight: 600;
+  }
+
+  .card-title { font-size: 14px; font-weight: 600; line-height: 1.4; margin-bottom: 6px; color: var(--text); }
+  .card-title a { color: inherit; text-decoration: none; }
+  .card-title a:hover { text-decoration: underline; color: var(--amber); }
+
+  .card-summary {
+    font-size: 12px; color: var(--muted); line-height: 1.55;
+    display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+    overflow: hidden; margin-bottom: 8px;
+  }
+
+  .card-footer {
+    display: flex; align-items: center; justify-content: space-between;
+    flex-wrap: wrap; gap: 6px; margin-top: 8px;
+  }
+  .card-date { font-size: 11px; color: var(--muted); }
+  .card-actions { display: flex; gap: 4px; flex-wrap: wrap; }
+  .action-btn {
+    padding: 3px 9px; border-radius: 12px; border: 1.5px solid var(--gray);
+    font-size: 11px; cursor: pointer; background: #fff; font-weight: 600;
+    transition: all .12s; white-space: nowrap;
+  }
+  .action-btn.queue   { border-color: var(--amber); color: var(--amber); }
+  .action-btn.queue:hover   { background: var(--amber); color: var(--navy); }
+  .action-btn.queue.active  { background: var(--amber); color: var(--navy); }
+  .action-btn.save    { border-color: var(--saved); color: var(--saved); }
+  .action-btn.save:hover  { background: var(--saved); color: #fff; }
+  .action-btn.save.active { background: var(--saved); color: #fff; }
+  .action-btn.skip    { border-color: var(--muted); color: var(--muted); }
+  .action-btn.skip:hover  { background: var(--muted); color: #fff; }
+  .action-btn.skip.active { background: var(--muted); color: #fff; }
+  .action-btn.reset   { border-color: var(--gray); color: var(--muted); }
+  .action-btn.reset:hover { background: var(--gray); }
+
+  .issue-tag {
+    display: inline-block; font-size: 10px; font-weight: 700; padding: 2px 8px;
+    border-radius: 8px; background: var(--green); color: #fff; margin-left: 6px;
+    text-transform: none; letter-spacing: 0;
+  }
+
+  /* ── Empty state ── */
+  #empty {
+    display: none; text-align: center; padding: 80px 24px; color: var(--muted);
+    grid-column: 1/-1;
+  }
+  #empty h3 { font-size: 18px; margin-bottom: 8px; }
+
+  /* ── Side panels ── */
+  .side-panel {
+    display: none; position: fixed; top: 0; right: 0; bottom: 0;
+    background: #fff; box-shadow: -4px 0 24px rgba(0,0,0,.15); z-index: 200;
+    overflow-y: auto; flex-direction: column;
+  }
+  .panel-header {
+    padding: 18px 24px; color: #fff;
+    display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
+    position: sticky; top: 0; z-index: 10;
+  }
+  .panel-header h2 { font-size: 17px; }
+  .close-btn { background: none; border: none; color: #fff; font-size: 24px; cursor: pointer; line-height: 1; }
+  .panel-body { padding: 20px 24px; flex: 1; }
+
+  /* Export panel */
+  #exportPanel { width: 440px; }
+  #exportPanel .panel-header { background: var(--navy); }
+  .export-article { border: 1px solid var(--gray); border-radius: 8px; padding: 12px; margin-bottom: 10px; }
+  .export-article h4 { font-size: 13px; margin-bottom: 4px; }
+  .export-article p  { font-size: 11px; color: var(--muted); margin-bottom: 6px; }
+  .export-article a  { font-size: 11px; color: var(--amber); word-break: break-all; }
+  .copy-md-btn {
+    display: block; width: 100%; padding: 10px; background: var(--amber);
+    color: var(--navy); font-weight: 700; border: none; border-radius: 8px;
+    cursor: pointer; font-size: 14px; margin-bottom: 12px;
+  }
+  #copyStatus { text-align: center; font-size: 12px; color: var(--green); height: 16px; }
+
+  /* Brief panel */
+  #briefPanel { width: 560px; }
+  #briefPanel .panel-header { background: var(--green); }
+  .brief-label {
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .07em; color: var(--muted); margin-bottom: 8px; display: block;
+  }
+  .section-block { margin-bottom: 20px; }
+  .generate-btn {
+    display: block; width: 100%; padding: 12px; background: var(--green);
+    color: #fff; font-weight: 700; border: none; border-radius: 8px;
+    cursor: pointer; font-size: 14px;
+  }
+  .generate-btn:hover { background: #145a2f; }
+  #briefOutput { display: none; margin-top: 20px; }
+  #briefText {
+    width: 100%; border: 1.5px solid var(--gray); border-radius: 8px;
+    padding: 12px; font-size: 12px; font-family: monospace;
+    line-height: 1.6; resize: vertical; min-height: 300px; outline: none;
+    color: var(--text); background: #FAFAFA;
+  }
+  .brief-copy-btn {
+    display: block; width: 100%; margin-top: 10px; padding: 11px;
+    background: var(--amber); color: var(--navy);
+    font-weight: 700; border: none; border-radius: 8px; cursor: pointer; font-size: 13px;
+  }
+  .brief-copy-btn:hover { background: #d4910d; }
+  #briefStatus { text-align: center; font-size: 12px; color: var(--green); height: 16px; margin-top: 6px; }
+  .source-chips { display: flex; flex-direction: column; gap: 6px; }
+  .source-chip {
+    background: var(--cream); border-radius: 6px; padding: 8px 10px;
+    font-size: 12px; line-height: 1.4; border: 1px solid var(--gray);
+  }
+  .source-chip strong { display: block; color: var(--text); }
+  .source-chip span { color: var(--muted); font-size: 11px; }
+  .no-selected-msg { text-align: center; padding: 30px 20px; color: var(--muted); font-size: 13px; }
+
+  /* Archive block */
+  .archive-block {
+    display: none; margin-top: 20px; border-top: 1px solid var(--gray); padding-top: 18px;
+  }
+  .archive-block h3 { font-size: 13px; font-weight: 700; margin-bottom: 6px; }
+  .archive-block p { font-size: 12px; color: var(--muted); margin-bottom: 10px; }
+  .small-input {
+    width: 100%; padding: 8px 12px; border: 1.5px solid var(--gray);
+    border-radius: 8px; font-size: 13px; outline: none; font-family: inherit; margin-bottom: 10px;
+  }
+  .small-input:focus { border-color: var(--green); }
+  .archive-btn {
+    display: block; width: 100%; padding: 10px; background: var(--archive);
+    color: #fff; font-weight: 700; border: none; border-radius: 8px;
+    cursor: pointer; font-size: 13px;
+  }
+  .archive-btn:hover { background: #555; }
+  #archiveStatus { text-align: center; font-size: 12px; color: var(--green); height: 16px; margin-top: 6px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div style="display:flex;align-items:center">
+    <div class="logo">STORY<span>LAB</span></div>
+    <span class="config-badge" id="configBadge">–</span>
+  </div>
+  <div class="meta" id="lastFetch">Loading…</div>
+</header>
+
+<div id="statsBar">
+  <div class="stat"><strong id="sTotal">–</strong> total</div>
+  <div class="stat"><strong id="sNew">–</strong> new</div>
+  <div class="stat highlight-blue"><strong id="sSaved">–</strong> saved</div>
+  <div class="stat highlight-amber"><strong id="sInQueue">–</strong> in queue</div>
+  <div class="stat highlight-gray"><strong id="sArchived">–</strong> archived</div>
+  <div class="stat"><strong id="sSkipped">–</strong> skipped</div>
+</div>
+
+<div id="controls">
+  <!-- Time range row -->
+  <div id="timeRow">
+    <span>Show:</span>
+    <button class="filter-btn time-btn active" data-days="14">2 weeks</button>
+    <button class="filter-btn time-btn" data-days="30">1 month</button>
+    <button class="filter-btn time-btn" data-days="90">3 months</button>
+    <button class="filter-btn time-btn" data-days="0">All time</button>
+  </div>
+  <!-- Status filters -->
+  <div class="filter-group" id="statusFilters">
+    <button class="filter-btn active" data-val="all">All</button>
+    <button class="filter-btn" data-val="new">New</button>
+    <button class="filter-btn" data-val="saved">Saved ★</button>
+    <button class="filter-btn" data-val="in_queue">In Queue</button>
+    <button class="filter-btn" data-val="archived">Archived</button>
+    <button class="filter-btn" data-val="skipped">Skipped</button>
+  </div>
+  <!-- Category filters — populated dynamically -->
+  <div class="filter-group" id="catFilters">
+    <button class="filter-btn active" data-val="all">All Topics</button>
+  </div>
+  <!-- Relevance filter -->
+  <div class="filter-group">
+    <button class="filter-btn leaders-btn" id="leadersBtn" data-active="false">★★★★+ Leaders</button>
+  </div>
+  <input class="search-box" id="searchBox" placeholder="Search articles, sources…" />
+  <!-- Bulk actions -->
+  <button class="bulk-btn" id="bulkQueueBtn">★ Add to Queue</button>
+  <button class="bulk-btn save-btn" id="bulkSaveBtn">Save for Later</button>
+  <button class="bulk-btn skip-btn" id="bulkSkipBtn">Skip</button>
+  <button class="export-btn" id="openExportBtn">Export →</button>
+  <button class="compose-btn" id="openBriefBtn">✍ Story Brief</button>
+  <span id="checkedCount"></span>
+</div>
+
+<div id="articles">
+  <div id="empty">
+    <h3>No articles found</h3>
+    <p>Run <code>python core/aggregator.py --config waypoint</code> to fetch content, then refresh.</p>
+  </div>
+</div>
+
+<!-- Story Brief Panel -->
+<div id="briefPanel" class="side-panel">
+  <div class="panel-header">
+    <h2>✍ Story Brief</h2>
+    <button class="close-btn" id="closeBriefBtn">×</button>
+  </div>
+  <div class="panel-body">
+    <div class="section-block">
+      <span class="brief-label">Queued source articles <span id="sourceCount" style="font-weight:400;text-transform:none;letter-spacing:0"></span></span>
+      <div class="source-chips" id="sourceChips">
+        <div class="no-selected-msg">No articles in queue yet.<br>Click <strong>★ Queue</strong> on cards first.</div>
+      </div>
+    </div>
+    <div class="section-block">
+      <button class="generate-btn" id="generateBriefBtn">Generate Story Brief →</button>
+    </div>
+    <div id="briefOutput">
+      <span class="brief-label">Story Brief — copy into Claude</span>
+      <textarea id="briefText" readonly></textarea>
+      <button class="brief-copy-btn" id="copyBriefBtn">Copy Brief to Clipboard</button>
+      <div id="briefStatus"></div>
+      <div class="archive-block" id="archiveBlock">
+        <h3>Archive your sources</h3>
+        <p>Tag the source articles in your intelligence library.</p>
+        <input class="small-input" id="archiveTagInput" placeholder="e.g. Fan Travel Trends — May 2026" />
+        <button class="archive-btn" id="archiveBtn">Archive Sources with This Tag →</button>
+        <div id="archiveStatus"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Export Panel -->
+<div id="exportPanel" class="side-panel">
+  <div class="panel-header">
+    <h2>In-Queue Articles</h2>
+    <button class="close-btn" id="closeExportBtn">×</button>
+  </div>
+  <div class="panel-body">
+    <button class="copy-md-btn" id="copyMarkdownBtn">Copy as Markdown</button>
+    <div id="copyStatus"></div>
+    <div id="exportList"></div>
+  </div>
+</div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+let allArticles = [];
+let checkedIds  = new Set();
+let filters     = { status: "all", cat: "all", search: "", days: 14, leadersOnly: false };
+let currentConfig = "waypoint";
+
+const STORY_TYPE_LABELS = {
+  "trend-signal": "Trend",
+  "case-study":   "Case Study",
+  "tool-or-data": "Tool/Data",
+  "interview":    "Interview",
+  "opinion":      "Opinion",
+};
+
+// ── API helpers ────────────────────────────────────────────────────────────
+async function api(path, method="GET", body=null) {
+  const opts = { method, headers: { "Content-Type": "application/json" } };
+  if (body) opts.body = JSON.stringify(body);
+  const r = await fetch(path, opts);
+  return r.json();
+}
+
+// ── Load stats ─────────────────────────────────────────────────────────────
+async function loadStats() {
+  const s = await api("/api/stats");
+  document.getElementById("sTotal").textContent    = s.total    ?? 0;
+  document.getElementById("sNew").textContent      = s.new      ?? 0;
+  document.getElementById("sSaved").textContent    = s.saved    ?? 0;
+  document.getElementById("sInQueue").textContent  = s.in_queue ?? 0;
+  document.getElementById("sArchived").textContent = s.archived ?? 0;
+  document.getElementById("sSkipped").textContent  = s.skipped  ?? 0;
+  if (s.last_fetch) {
+    const d = new Date(s.last_fetch);
+    document.getElementById("lastFetch").textContent =
+      "Last fetch: " + d.toLocaleDateString() + " " + d.toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"});
+  }
+  if (s.config) {
+    currentConfig = s.config;
+    document.getElementById("configBadge").textContent = s.config;
+  }
+  // Populate category filters dynamically
+  if (s.categories && s.categories.length) {
+    buildCatFilters(s.categories);
+  }
+}
+
+function buildCatFilters(categories) {
+  const container = document.getElementById("catFilters");
+  const current = filters.cat;
+  container.innerHTML = `<button class="filter-btn ${current === "all" ? "active" : ""}" data-val="all">All Topics</button>`;
+  categories.forEach(cat => {
+    const label = cat.replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+    const btn = document.createElement("button");
+    btn.className = `filter-btn ${current === cat ? "active" : ""}`;
+    btn.dataset.val = cat;
+    btn.textContent = label;
+    container.appendChild(btn);
+  });
+}
+
+// ── Load articles ──────────────────────────────────────────────────────────
+async function loadArticles() {
+  const params = new URLSearchParams({
+    status: filters.status,
+    category: filters.cat,
+    days: filters.days,
+    min_relevance: filters.leadersOnly ? 4 : 0,
+  });
+  allArticles = await api("/api/articles?" + params);
+  renderArticles();
+}
+
+function formatDate(iso) {
+  if (!iso) return "";
+  try {
+    const d = new Date(iso);
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  } catch { return iso.slice(0,10); }
+}
+
+function scoreStars(score) {
+  const filled = "★".repeat(score || 0);
+  const empty  = "☆".repeat(5 - (score || 0));
+  return filled + empty;
+}
+
+function renderArticles() {
+  const search = filters.search.toLowerCase();
+  let visible = allArticles;
+  if (search) {
+    visible = visible.filter(a =>
+      (a.title||"").toLowerCase().includes(search) ||
+      (a.summary||"").toLowerCase().includes(search) ||
+      (a.source||"").toLowerCase().includes(search) ||
+      (a.issue_tag||"").toLowerCase().includes(search)
+    );
+  }
+
+  const container = document.getElementById("articles");
+  const empty     = document.getElementById("empty");
+  container.innerHTML = "";
+  container.appendChild(empty);
+
+  if (visible.length === 0) { empty.style.display = "block"; return; }
+  empty.style.display = "none";
+
+  visible.forEach(art => {
+    const isChecked   = checkedIds.has(art.id);
+    const score       = art.relevance_score || 0;
+    const scoreClass  = score >= 1 ? `score-${score}` : "";
+    const catClass    = "cat-" + (art.category || "").replace(/[^a-z0-9]/g,"-");
+    const isQueued    = art.status === "in_queue";
+    const isSaved     = art.status === "saved";
+    const isArchived  = art.status === "archived";
+    const storyLabel  = STORY_TYPE_LABELS[art.story_type] || art.story_type || "";
+
+    const card = document.createElement("div");
+    card.className = `card ${art.status} ${catClass} ${scoreClass}`;
+    card.dataset.id = art.id;
+
+    const queueLabel = isQueued ? "★ Queued" : "★ Queue";
+    const queueAction = isQueued ? "saved" : "in_queue";
+
+    card.innerHTML = `
+      <div class="card-check ${isChecked ? "on" : ""}" data-id="${art.id}"></div>
+      <div class="card-source">
+        ${art.source}
+        <span class="cat-badge">${art.category}</span>
+        ${score ? `<span class="score-badge">${scoreStars(score)}</span>` : ""}
+        ${storyLabel ? `<span class="story-type-badge">${storyLabel}</span>` : ""}
+        ${art.issue_tag ? `<span class="issue-tag">📁 ${art.issue_tag}</span>` : ""}
+      </div>
+      <div class="card-title">
+        <a href="${art.url}" target="_blank" rel="noopener">${art.title}</a>
+      </div>
+      ${art.summary ? `<div class="card-summary">${art.summary}</div>` : ""}
+      <div class="card-footer">
+        <span class="card-date">${formatDate(art.published_date)}</span>
+        <div class="card-actions">
+          <button class="action-btn queue ${isQueued ? "active" : ""}"
+            data-action="${queueAction}" data-id="${art.id}">${queueLabel}</button>
+          <button class="action-btn save ${isSaved ? "active" : ""}"
+            data-action="saved" data-id="${art.id}">Save</button>
+          <button class="action-btn skip ${art.status === "skipped" ? "active" : ""}"
+            data-action="skipped" data-id="${art.id}">Skip</button>
+          ${art.status !== "new" ? `<button class="action-btn reset" data-action="new" data-id="${art.id}">↺</button>` : ""}
+        </div>
+      </div>
+    `;
+    container.appendChild(card);
+  });
+
+  updateCheckedCount();
+}
+
+// ── Update single article status ──────────────────────────────────────────
+async function updateStatus(id, status) {
+  await api("/api/update", "POST", { id, status });
+  const art = allArticles.find(a => a.id == id);
+  if (art) art.status = status;
+  renderArticles();
+  loadStats();
+}
+
+// ── Event delegation on cards ─────────────────────────────────────────────
+document.getElementById("articles").addEventListener("click", async e => {
+  const checkEl = e.target.closest(".card-check");
+  if (checkEl) {
+    const id = parseInt(checkEl.dataset.id);
+    if (checkedIds.has(id)) checkedIds.delete(id);
+    else checkedIds.add(id);
+    checkEl.classList.toggle("on");
+    updateCheckedCount();
+    return;
+  }
+  const btn = e.target.closest(".action-btn");
+  if (btn && btn.dataset.action && btn.dataset.id) {
+    e.stopPropagation();
+    await updateStatus(parseInt(btn.dataset.id), btn.dataset.action);
+  }
+});
+
+function updateCheckedCount() {
+  const n = checkedIds.size;
+  document.getElementById("checkedCount").textContent = n > 0 ? `${n} checked` : "";
+}
+
+// ── Time range filter ─────────────────────────────────────────────────────
+document.getElementById("timeRow").addEventListener("click", e => {
+  const btn = e.target.closest(".time-btn");
+  if (!btn) return;
+  document.querySelectorAll(".time-btn").forEach(b => b.classList.remove("active"));
+  btn.classList.add("active");
+  filters.days = parseInt(btn.dataset.days);
+  loadArticles();
+});
+
+// ── Status filters ─────────────────────────────────────────────────────────
+document.getElementById("statusFilters").addEventListener("click", e => {
+  const btn = e.target.closest(".filter-btn");
+  if (!btn) return;
+  document.querySelectorAll("#statusFilters .filter-btn").forEach(b => b.classList.remove("active"));
+  btn.classList.add("active");
+  filters.status = btn.dataset.val;
+  loadArticles();
+});
+
+// ── Category filters ───────────────────────────────────────────────────────
+document.getElementById("catFilters").addEventListener("click", e => {
+  const btn = e.target.closest(".filter-btn");
+  if (!btn) return;
+  document.querySelectorAll("#catFilters .filter-btn").forEach(b => b.classList.remove("active"));
+  btn.classList.add("active");
+  filters.cat = btn.dataset.val;
+  loadArticles();
+});
+
+// ── Leaders filter ─────────────────────────────────────────────────────────
+document.getElementById("leadersBtn").addEventListener("click", () => {
+  const btn = document.getElementById("leadersBtn");
+  filters.leadersOnly = !filters.leadersOnly;
+  btn.dataset.active = filters.leadersOnly;
+  btn.classList.toggle("active", filters.leadersOnly);
+  loadArticles();
+});
+
+// ── Search ─────────────────────────────────────────────────────────────────
+let searchTimer;
+document.getElementById("searchBox").addEventListener("input", e => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => { filters.search = e.target.value; renderArticles(); }, 200);
+});
+
+// ── Bulk actions ───────────────────────────────────────────────────────────
+document.getElementById("bulkQueueBtn").addEventListener("click", async () => {
+  if (!checkedIds.size) return;
+  await api("/api/bulk-update", "POST", { ids: [...checkedIds], status: "in_queue" });
+  checkedIds.forEach(id => { const a = allArticles.find(x => x.id==id); if(a) a.status="in_queue"; });
+  checkedIds.clear();
+  renderArticles(); loadStats();
+});
+
+document.getElementById("bulkSaveBtn").addEventListener("click", async () => {
+  if (!checkedIds.size) return;
+  await api("/api/bulk-update", "POST", { ids: [...checkedIds], status: "saved" });
+  checkedIds.forEach(id => { const a = allArticles.find(x => x.id==id); if(a) a.status="saved"; });
+  checkedIds.clear();
+  renderArticles(); loadStats();
+});
+
+document.getElementById("bulkSkipBtn").addEventListener("click", async () => {
+  if (!checkedIds.size) return;
+  await api("/api/bulk-update", "POST", { ids: [...checkedIds], status: "skipped" });
+  checkedIds.forEach(id => { const a = allArticles.find(x => x.id==id); if(a) a.status="skipped"; });
+  checkedIds.clear();
+  renderArticles(); loadStats();
+});
+
+// ── Export panel ───────────────────────────────────────────────────────────
+document.getElementById("openExportBtn").addEventListener("click", async () => {
+  const selected = await api("/api/export");
+  const list = document.getElementById("exportList");
+  list.innerHTML = "";
+  if (!selected.length) {
+    list.innerHTML = "<p style='color:#888;text-align:center;padding:20px'>No articles in queue.<br>Click ★ Queue on cards to add them.</p>";
+  } else {
+    selected.forEach(a => {
+      const div = document.createElement("div");
+      div.className = "export-article";
+      div.innerHTML = `
+        <h4>${a.title}</h4>
+        <p>${a.source} · ${formatDate(a.published_date)} · <em>${a.category}</em> · ${scoreStars(a.relevance_score)}</p>
+        <p style="margin-bottom:4px">${a.summary || ""}</p>
+        <a href="${a.url}" target="_blank">${a.url}</a>
+      `;
+      list.appendChild(div);
+    });
+  }
+  document.getElementById("exportPanel").style.display = "flex";
+});
+document.getElementById("closeExportBtn").addEventListener("click", () => {
+  document.getElementById("exportPanel").style.display = "none";
+});
+
+document.getElementById("copyMarkdownBtn").addEventListener("click", async () => {
+  const selected = await api("/api/export");
+  if (!selected.length) return;
+  const grouped = {};
+  selected.forEach(a => {
+    const cat = a.category || "other";
+    if (!grouped[cat]) grouped[cat] = [];
+    grouped[cat].push(a);
+  });
+  let md = "## StoryLab — Selected Signals\n\n";
+  for (const [cat, arts] of Object.entries(grouped)) {
+    md += `### ${cat.toUpperCase()}\n\n`;
+    arts.forEach(a => {
+      md += `**${a.title}**  \n`;
+      md += `*${a.source} — ${formatDate(a.published_date)} — ${scoreStars(a.relevance_score)}*  \n`;
+      if (a.summary) md += `${a.summary}  \n`;
+      md += `[Read →](${a.url})\n\n`;
+    });
+  }
+  try {
+    await navigator.clipboard.writeText(md);
+    const s = document.getElementById("copyStatus");
+    s.textContent = "✓ Copied to clipboard";
+    setTimeout(() => s.textContent = "", 2000);
+  } catch(e) {
+    document.getElementById("copyStatus").textContent = "Copy failed — try selecting manually";
+  }
+});
+
+// ── Story Brief panel ──────────────────────────────────────────────────────
+async function openBrief() {
+  const selected = await api("/api/export");
+  const chips = document.getElementById("sourceChips");
+  const countEl = document.getElementById("sourceCount");
+  chips.innerHTML = "";
+  document.getElementById("briefOutput").style.display = "none";
+  document.getElementById("archiveBlock").style.display = "none";
+
+  if (!selected.length) {
+    chips.innerHTML = '<div class="no-selected-msg">No articles in queue yet.<br>Click <strong>★ Queue</strong> on cards first.</div>';
+    countEl.textContent = "";
+  } else {
+    countEl.textContent = `(${selected.length} article${selected.length !== 1 ? "s" : ""})`;
+    selected.forEach(a => {
+      const chip = document.createElement("div");
+      chip.className = "source-chip";
+      chip.innerHTML = `
+        <strong>${a.title}</strong>
+        <span>${a.source} · ${formatDate(a.published_date)} · ${scoreStars(a.relevance_score)} · ${STORY_TYPE_LABELS[a.story_type] || a.story_type || ""}</span>
+      `;
+      chips.appendChild(chip);
+    });
+  }
+  document.getElementById("briefPanel").style.display = "flex";
+}
+
+document.getElementById("openBriefBtn").addEventListener("click", openBrief);
+document.getElementById("closeBriefBtn").addEventListener("click", () => {
+  document.getElementById("briefPanel").style.display = "none";
+});
+
+document.getElementById("generateBriefBtn").addEventListener("click", async () => {
+  const selected = await api("/api/export");
+  if (!selected.length) {
+    alert("Add at least one article to your queue first (click ★ Queue on cards).");
+    return;
+  }
+
+  const sourceCapsules = selected.map((a, i) => {
+    const thin = !a.summary || a.summary.trim().split(/\s+/).length < 25;
+    return `SOURCE ${i+1}:
+Title: ${a.title}
+Outlet: ${a.source}
+Date: ${formatDate(a.published_date)}
+URL: ${a.url}
+Relevance: ${a.relevance_score}/5 — ${a.story_type}
+RSS Summary: ${a.summary || "(none)"}
+${thin ? "Note: thin summary — derive signal from title only, do not fabricate specifics." : ""}`;
+  }).join("\n\n---\n\n");
+
+  const brief = `STORYLAB — STORY BRIEF
+Config: ${currentConfig.toUpperCase()}
+Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
+Articles in queue: ${selected.length}
+
+FACT BOUNDARY (NON-NEGOTIABLE):
+Only assert specifics present in the RSS summary. Do not fabricate statistics, quotes, or program details. Label hypotheses with "likely" or "may". Do not pitch ${currentConfig === "waypoint" ? "Waypoint" : "Longitude"} explicitly — persuasion is implicit through credibility.
+
+STORY BRIEF FIELDS TO COMPLETE:
+- Story type: [trend-signal / case-study / tool-or-data / interview / opinion]
+- Intended person-role: [from person_roles.py — e.g. AD Marketing Director, Fan, Agent]
+- Recommended formats (ranked): [text / meme / infographic / tool-or-database / audio / podcast / short video / long video / game]
+- Calendar moment / trigger: [current season moment or evergreen]
+- Suggested angle / hook: [one sentence — the hill to die on]
+- Revenue / relationship chain close: [Waypoint: fan loyalty → booking → AD revenue | Longitude: agent relationship → trust → transaction]
+
+SOURCE CAPSULES:
+${sourceCapsules}
+
+---
+Write the Story Brief now using only the sources above.`;
+
+  document.getElementById("briefText").value = brief;
+  document.getElementById("briefOutput").style.display = "block";
+  document.getElementById("archiveBlock").style.display = "block";
+  document.getElementById("briefText").scrollIntoView({ behavior: "smooth", block: "nearest" });
+});
+
+document.getElementById("copyBriefBtn").addEventListener("click", async () => {
+  const text = document.getElementById("briefText").value;
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+    const s = document.getElementById("briefStatus");
+    s.textContent = "✓ Copied — paste into Claude";
+    setTimeout(() => s.textContent = "", 3000);
+  } catch(e) {
+    document.getElementById("briefStatus").textContent = "Select all text above and copy manually";
+  }
+});
+
+// ── Archive sources ─────────────────────────────────────────────────────────
+document.getElementById("archiveBtn").addEventListener("click", async () => {
+  const tag = document.getElementById("archiveTagInput").value.trim();
+  if (!tag) {
+    document.getElementById("archiveStatus").textContent = "Enter a title first.";
+    return;
+  }
+  const selected = await api("/api/export");
+  if (!selected.length) return;
+  const ids = selected.map(a => a.id);
+  for (const id of ids) {
+    await api("/api/update", "POST", { id, status: "archived", issue_tag: tag });
+  }
+  allArticles.forEach(a => {
+    if (ids.includes(a.id)) { a.status = "archived"; a.issue_tag = tag; }
+  });
+  const s = document.getElementById("archiveStatus");
+  s.textContent = `✓ ${ids.length} article${ids.length !== 1 ? "s" : ""} archived as "${tag}"`;
+  setTimeout(() => s.textContent = "", 4000);
+  document.getElementById("archiveTagInput").value = "";
+  document.getElementById("archiveBlock").style.display = "none";
+  renderArticles(); loadStats();
+});
+
+// ── Init ───────────────────────────────────────────────────────────────────
+loadStats();
+loadArticles();
+setInterval(loadStats, 30000);
+</script>
+</body>
+</html>
