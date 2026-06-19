@@ -5,10 +5,11 @@ core/server.py — StoryLab Curation Dashboard
 Starts a local web server with the review dashboard.
 
 Usage:
-    python core/server.py --config waypoint
+    python core/server.py --config travel_tech_ux
+    python core/server.py --config fan_atlas_insiders
     python core/server.py --config longitude
-    python core/server.py --config waypoint --port 9000
-    python core/server.py --config waypoint --no-open
+    python core/server.py --config travel_tech_ux --port 9000
+    python core/server.py --config travel_tech_ux --no-open
 """
 
 import sqlite3
@@ -29,7 +30,7 @@ sys.path.insert(0, REPO_ROOT)
 DB_PATH   = os.path.join(REPO_ROOT, "curation.db")
 HTML_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dashboard.html")
 
-_config = "waypoint"
+_config = "travel_tech_ux"
 
 
 def get_conn():
@@ -127,6 +128,13 @@ class Handler(BaseHTTPRequestHandler):
             ).fetchone()[0]
             stats["last_fetch"] = last_fetch
             stats["config"] = _config
+            try:
+                config_meta = importlib.import_module(f"configs.{_config}")
+                stats["display_name"] = getattr(config_meta, "DISPLAY_NAME", _config.capitalize())
+                stats["closing_line"] = getattr(config_meta, "CLOSING_LINE", "")
+            except ImportError:
+                stats["display_name"] = _config.capitalize()
+                stats["closing_line"] = ""
             # Dynamic category list
             cats = conn.execute(
                 "SELECT DISTINCT category FROM articles WHERE config = ? ORDER BY category",
@@ -197,7 +205,8 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     global _config
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config",  default="waypoint", choices=["waypoint", "longitude"])
+    parser.add_argument("--config",  default="travel_tech_ux",
+                         choices=["travel_tech_ux", "fan_atlas_insiders", "longitude"])
     parser.add_argument("--port",    type=int, default=8765)
     parser.add_argument("--no-open", action="store_true")
     args = parser.parse_args()
@@ -210,8 +219,14 @@ def main():
         conn.close()
         print(f"  Created new database. Run aggregator.py --config {_config} to populate it.")
 
+    try:
+        config_meta = importlib.import_module(f"configs.{_config}")
+        display_name = getattr(config_meta, "DISPLAY_NAME", _config.capitalize())
+    except ImportError:
+        display_name = _config.capitalize()
+
     url = f"http://localhost:{args.port}"
-    print(f"\n  StoryLab Dashboard — {_config.capitalize()}")
+    print(f"\n  StoryLab Dashboard — {display_name}")
     print(f"  Open: {url}")
     print(f"  Stop: Ctrl+C\n")
 

@@ -1,8 +1,8 @@
 #!/bin/bash
 # StoryLab — Mac launcher
-# Usage: bash run_mac.sh [waypoint|longitude]
+# Usage: bash run_mac.sh [travel_tech_ux|fan_atlas_insiders|longitude]
 
-CONFIG="${1:-waypoint}"
+CONFIG="${1:-travel_tech_ux}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 echo ""

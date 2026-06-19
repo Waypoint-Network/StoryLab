@@ -5,10 +5,11 @@ core/aggregator.py — StoryLab Feed Aggregator
 Fetches all RSS/Atom feeds for a given config and stores articles to SQLite.
 
 Usage:
-    python core/aggregator.py --config waypoint
+    python core/aggregator.py --config travel_tech_ux
+    python core/aggregator.py --config fan_atlas_insiders
     python core/aggregator.py --config longitude
-    python core/aggregator.py --config waypoint --days 3
-    python core/aggregator.py --config waypoint --dry-run
+    python core/aggregator.py --config travel_tech_ux --days 3
+    python core/aggregator.py --config travel_tech_ux --dry-run
 """
 
 import sqlite3
@@ -68,7 +69,7 @@ def init_db(conn):
             status           TEXT    DEFAULT 'new',
             relevance_score  INTEGER DEFAULT 0,
             story_type       TEXT,
-            config           TEXT    NOT NULL DEFAULT 'waypoint',
+            config           TEXT    NOT NULL DEFAULT 'travel_tech_ux',
             issue_tag        TEXT,
             notes            TEXT
         );
@@ -241,10 +242,13 @@ def too_old(pub_str, max_days):
         return False
 
 
-def run(config="waypoint", dry_run=False, max_days=MAX_DAYS):
+def run(config="travel_tech_ux", dry_run=False, max_days=MAX_DAYS):
     feeds_mod = importlib.import_module(f"configs.{config}.feeds")
     FEEDS = feeds_mod.FEEDS
     NO_RSS_SOURCES = getattr(feeds_mod, "NO_RSS_SOURCES", [])
+
+    config_meta = importlib.import_module(f"configs.{config}")
+    display_name = getattr(config_meta, "DISPLAY_NAME", config.capitalize())
 
     from core.scorer import score_article
 
@@ -255,7 +259,7 @@ def run(config="waypoint", dry_run=False, max_days=MAX_DAYS):
     now = datetime.now(timezone.utc).isoformat()
 
     print(f"\n{'='*60}")
-    print(f"  StoryLab Aggregator — {config.capitalize()}")
+    print(f"  StoryLab Aggregator — {display_name}")
     print(f"  Run: {now[:19]}Z")
     print(f"{'='*60}\n")
 
@@ -328,7 +332,8 @@ def run(config="waypoint", dry_run=False, max_days=MAX_DAYS):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="StoryLab RSS Aggregator")
-    parser.add_argument("--config",  default="waypoint", choices=["waypoint", "longitude"])
+    parser.add_argument("--config",  default="travel_tech_ux",
+                         choices=["travel_tech_ux", "fan_atlas_insiders", "longitude"])
     parser.add_argument("--days",    type=int, default=MAX_DAYS)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()

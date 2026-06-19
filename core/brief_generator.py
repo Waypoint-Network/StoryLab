@@ -6,10 +6,10 @@ Queries top high-relevance articles from the past 7 days and outputs a
 structured markdown Story Brief for the operator to review and route.
 
 Usage:
-    python core/brief_generator.py --config waypoint
-    python core/brief_generator.py --config waypoint --days 14
-    python core/brief_generator.py --config waypoint --min-score 3
-    python core/brief_generator.py --config waypoint --out output/briefs/brief_2026-05-26.md
+    python core/brief_generator.py --config travel_tech_ux
+    python core/brief_generator.py --config travel_tech_ux --days 14
+    python core/brief_generator.py --config travel_tech_ux --min-score 3
+    python core/brief_generator.py --config travel_tech_ux --out output/briefs/brief_2026-05-26.md
 """
 
 import sqlite3
@@ -40,9 +40,13 @@ FORMAT_RECOMMENDATIONS = {
 }
 
 
-def generate_brief(config="waypoint", days=7, min_score=4, out_path=None):
+def generate_brief(config="travel_tech_ux", days=7, min_score=4, out_path=None):
     roles_mod = importlib.import_module(f"configs.{config}.person_roles")
     PERSON_ROLES = roles_mod.PERSON_ROLES
+
+    config_meta = importlib.import_module(f"configs.{config}")
+    display_name = getattr(config_meta, "DISPLAY_NAME", config.capitalize())
+    closing_line = getattr(config_meta, "CLOSING_LINE", None)
 
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -65,7 +69,7 @@ def generate_brief(config="waypoint", days=7, min_score=4, out_path=None):
 
     lines = [
         f"# StoryLab — Weekly Story Brief",
-        f"**Config:** {config.capitalize()}  ",
+        f"**Config:** {display_name}  ",
         f"**Generated:** {date_str}  ",
         f"**Articles:** {len(rows)} (score ≥{min_score}, past {days} days)  ",
         "",
@@ -76,7 +80,7 @@ def generate_brief(config="waypoint", days=7, min_score=4, out_path=None):
         "Only assert specifics present in the RSS summary below.",
         "Do not fabricate statistics, quotes, or program details.",
         "Label hypotheses with 'likely' or 'may'.",
-        f"Do not pitch {config.capitalize()} explicitly — persuasion is implicit through credibility.",
+        f"Do not pitch {display_name} explicitly — persuasion is implicit through credibility.",
         "",
         "---",
         "",
@@ -137,10 +141,10 @@ def generate_brief(config="waypoint", days=7, min_score=4, out_path=None):
         "- **Suggested angle / hook:** [one sentence — the hill to die on]",
     ]
 
-    if config == "waypoint":
-        lines.append("- **Revenue chain close:** [fan loyalty → behavior shift → travel booking → new revenue for the AD]")
+    if closing_line:
+        lines.append(closing_line)
     else:
-        lines.append("- **Relationship chain close:** [agent relationship → trust → transaction]")
+        lines.append("- **Closing line:** [define CLOSING_LINE in this config's __init__.py]")
 
     lines += [
         "",
@@ -163,7 +167,8 @@ def generate_brief(config="waypoint", days=7, min_score=4, out_path=None):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="StoryLab Story Brief Generator")
-    parser.add_argument("--config",    default="waypoint", choices=["waypoint", "longitude"])
+    parser.add_argument("--config",    default="travel_tech_ux",
+                         choices=["travel_tech_ux", "fan_atlas_insiders", "longitude"])
     parser.add_argument("--days",      type=int, default=7)
     parser.add_argument("--min-score", type=int, default=4)
     parser.add_argument("--out",       default="", help="Output file path (default: stdout)")

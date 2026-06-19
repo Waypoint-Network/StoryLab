@@ -351,7 +351,7 @@
 <div id="articles">
   <div id="empty">
     <h3>No articles found</h3>
-    <p>Run <code>python core/aggregator.py --config waypoint</code> to fetch content, then refresh.</p>
+    <p>Run <code>python core/aggregator.py --config &lt;name&gt;</code> to fetch content, then refresh.</p>
   </div>
 </div>
 
@@ -405,7 +405,9 @@
 let allArticles = [];
 let checkedIds  = new Set();
 let filters     = { status: "all", cat: "all", search: "", days: 14, leadersOnly: false };
-let currentConfig = "waypoint";
+let currentConfig = "travel_tech_ux";
+let currentDisplayName = "";
+let currentClosingLine = "";
 
 const STORY_TYPE_LABELS = {
   "trend-signal": "Trend",
@@ -441,6 +443,8 @@ async function loadStats() {
     currentConfig = s.config;
     document.getElementById("configBadge").textContent = s.config;
   }
+  currentDisplayName = s.display_name || currentConfig;
+  currentClosingLine = s.closing_line || "";
   // Populate category filters dynamically
   if (s.categories && s.categories.length) {
     buildCatFilters(s.categories);
@@ -766,20 +770,20 @@ ${thin ? "Note: thin summary — derive signal from title only, do not fabricate
   }).join("\n\n---\n\n");
 
   const brief = `STORYLAB — STORY BRIEF
-Config: ${currentConfig.toUpperCase()}
+Config: ${currentDisplayName.toUpperCase()}
 Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
 Articles in queue: ${selected.length}
 
 FACT BOUNDARY (NON-NEGOTIABLE):
-Only assert specifics present in the RSS summary. Do not fabricate statistics, quotes, or program details. Label hypotheses with "likely" or "may". Do not pitch ${currentConfig === "waypoint" ? "Waypoint" : "Longitude"} explicitly — persuasion is implicit through credibility.
+Only assert specifics present in the RSS summary. Do not fabricate statistics, quotes, or program details. Label hypotheses with "likely" or "may". Do not pitch ${currentDisplayName} explicitly — persuasion is implicit through credibility.
 
 STORY BRIEF FIELDS TO COMPLETE:
 - Story type: [trend-signal / case-study / tool-or-data / interview / opinion]
-- Intended person-role: [from person_roles.py — e.g. AD Marketing Director, Fan, Agent]
+- Intended person-role: [from this config's person_roles.py]
 - Recommended formats (ranked): [text / meme / infographic / tool-or-database / audio / podcast / short video / long video / game]
 - Calendar moment / trigger: [current season moment or evergreen]
 - Suggested angle / hook: [one sentence — the hill to die on]
-- Revenue / relationship chain close: [Waypoint: fan loyalty → booking → AD revenue | Longitude: agent relationship → trust → transaction]
+${currentClosingLine || "- Closing line: [define CLOSING_LINE in this config's __init__.py]"}
 
 SOURCE CAPSULES:
 ${sourceCapsules}
