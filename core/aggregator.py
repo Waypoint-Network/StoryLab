@@ -30,6 +30,12 @@ from email.utils import parsedate_to_datetime
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO_ROOT)
 
+# Windows consoles default to a legacy codepage that can't encode the
+# ★ / ✓ / ✗ / — characters this script prints — force UTF-8 output.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+
 try:
     import certifi
     _SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())

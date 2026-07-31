@@ -27,6 +27,12 @@ from datetime import datetime
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO_ROOT)
 
+# Windows consoles default to a legacy codepage that can't encode the
+# — character this script prints — force UTF-8 output.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+
 DB_PATH   = os.path.join(REPO_ROOT, "curation.db")
 HTML_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dashboard.html")
 
@@ -132,9 +138,11 @@ class Handler(BaseHTTPRequestHandler):
                 config_meta = importlib.import_module(f"configs.{_config}")
                 stats["display_name"] = getattr(config_meta, "DISPLAY_NAME", _config.capitalize())
                 stats["closing_line"] = getattr(config_meta, "CLOSING_LINE", "")
+                stats["category_groups"] = getattr(config_meta, "CATEGORY_GROUPS", {})
             except ImportError:
                 stats["display_name"] = _config.capitalize()
                 stats["closing_line"] = ""
+                stats["category_groups"] = {}
             # Dynamic category list
             cats = conn.execute(
                 "SELECT DISTINCT category FROM articles WHERE config = ? ORDER BY category",

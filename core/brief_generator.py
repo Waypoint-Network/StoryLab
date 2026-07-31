@@ -23,6 +23,12 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO_ROOT)
 DB_PATH = os.path.join(REPO_ROOT, "curation.db")
 
+# Windows consoles default to a legacy codepage that can't encode the
+# ★ / ☆ / — characters this script prints — force UTF-8 output.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+
 STORY_TYPE_LABELS = {
     "trend-signal": "Trend Signal",
     "case-study":   "Case Study",
@@ -156,7 +162,7 @@ def generate_brief(config="travel_tech_ux", days=7, min_score=4, out_path=None):
 
     if out_path:
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
-        with open(out_path, "w") as f:
+        with open(out_path, "w", encoding="utf-8") as f:
             f.write(brief)
         print(f"Brief written to: {out_path}")
     else:

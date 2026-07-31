@@ -408,6 +408,7 @@ let filters     = { status: "all", cat: "all", search: "", days: 14, leadersOnly
 let currentConfig = "travel_tech_ux";
 let currentDisplayName = "";
 let currentClosingLine = "";
+let currentCategoryGroups = {};
 
 const STORY_TYPE_LABELS = {
   "trend-signal": "Trend",
@@ -445,6 +446,7 @@ async function loadStats() {
   }
   currentDisplayName = s.display_name || currentConfig;
   currentClosingLine = s.closing_line || "";
+  currentCategoryGroups = s.category_groups || {};
   // Populate category filters dynamically
   if (s.categories && s.categories.length) {
     buildCatFilters(s.categories);
@@ -455,6 +457,23 @@ function buildCatFilters(categories) {
   const container = document.getElementById("catFilters");
   const current = filters.cat;
   container.innerHTML = `<button class="filter-btn ${current === "all" ? "active" : ""}" data-val="all">All Topics</button>`;
+
+  // If this config groups raw categories under display labels (e.g. flywheel
+  // maps), render one tab per group instead of one per raw category value.
+  if (currentCategoryGroups && Object.keys(currentCategoryGroups).length) {
+    const seen = new Set();
+    Object.values(currentCategoryGroups).forEach(group => {
+      if (seen.has(group)) return;
+      seen.add(group);
+      const btn = document.createElement("button");
+      btn.className = `filter-btn ${current === group ? "active" : ""}`;
+      btn.dataset.val = group;
+      btn.textContent = group;
+      container.appendChild(btn);
+    });
+    return;
+  }
+
   categories.forEach(cat => {
     const label = cat.replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase());
     const btn = document.createElement("button");
@@ -467,9 +486,12 @@ function buildCatFilters(categories) {
 
 // ── Load articles ──────────────────────────────────────────────────────────
 async function loadArticles() {
+  // Category filtering happens client-side in renderArticles() so that
+  // grouped configs (filters.cat holding a group label, not a raw category)
+  // work the same way ungrouped configs do -- always fetch all categories.
   const params = new URLSearchParams({
     status: filters.status,
-    category: filters.cat,
+    category: "all",
     days: filters.days,
     min_relevance: filters.leadersOnly ? 4 : 0,
   });
@@ -494,6 +516,9 @@ function scoreStars(score) {
 function renderArticles() {
   const search = filters.search.toLowerCase();
   let visible = allArticles;
+  if (filters.cat !== "all") {
+    visible = visible.filter(a => (currentCategoryGroups[a.category] || a.category) === filters.cat);
+  }
   if (search) {
     visible = visible.filter(a =>
       (a.title||"").toLowerCase().includes(search) ||
