@@ -447,9 +447,12 @@ async function loadStats() {
   currentDisplayName = s.display_name || currentConfig;
   currentClosingLine = s.closing_line || "";
   currentCategoryGroups = s.category_groups || {};
-  // Populate category filters dynamically
-  if (s.categories && s.categories.length) {
-    buildCatFilters(s.categories);
+  // Populate category filters dynamically. Group tabs are static config
+  // metadata (not derived from articles), so build them even when there
+  // are zero articles yet; raw per-category tabs still need real data.
+  const hasGroups = Object.keys(currentCategoryGroups).length > 0;
+  if (hasGroups || (s.categories && s.categories.length)) {
+    buildCatFilters(s.categories || []);
   }
 }
 
