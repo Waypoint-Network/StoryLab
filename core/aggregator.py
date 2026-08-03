@@ -256,10 +256,11 @@ def run(config="travel_tech_ux", dry_run=False, max_days=MAX_DAYS):
     config_meta = importlib.import_module(f"configs.{config}")
     display_name = getattr(config_meta, "DISPLAY_NAME", config.capitalize())
 
-    from core.scorer import score_article
+    from core.scorer import score_article, seed_scoring_criteria_if_empty
 
     conn = sqlite3.connect(DB_PATH)
     init_db(conn)
+    seed_scoring_criteria_if_empty(conn, config)
 
     total_added = 0
     now = datetime.now(timezone.utc).isoformat()
@@ -285,7 +286,7 @@ def run(config="travel_tech_ux", dry_run=False, max_days=MAX_DAYS):
                 if too_old(art["published"], max_days):
                     continue
                 relevance_score, story_type = score_article(
-                    art["title"], art["summary"] or "", art["category"], config
+                    art["title"], art["summary"] or "", art["category"], config, conn
                 )
                 if dry_run:
                     print(f"      [{relevance_score}★ {story_type}] {art['title'][:60]}")

@@ -33,8 +33,9 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
     sys.stderr.reconfigure(encoding="utf-8")
 
-DB_PATH   = os.path.join(REPO_ROOT, "curation.db")
-HTML_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dashboard.html")
+DB_PATH        = os.path.join(REPO_ROOT, "curation.db")
+HTML_PATH      = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dashboard.html")
+CRITERIA_PATH  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "criteria.html")
 
 _config = "travel_tech_ux"
 
@@ -81,6 +82,10 @@ class Handler(BaseHTTPRequestHandler):
 
         if path in ("/", "/dashboard"):
             self.send_html(HTML_PATH)
+            return
+
+        if path in ("/criteria", "/scoring-criteria"):
+            self.send_html(CRITERIA_PATH)
             return
 
         if path == "/api/articles":
@@ -153,6 +158,27 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(stats)
             return
 
+        if path == "/api/scoring-criteria":
+            from core.scorer import seed_scoring_criteria_if_empty
+            conn = get_conn()
+            seed_scoring_criteria_if_empty(conn, _config)
+            rows = conn.execute("""
+                SELECT id, flywheel_group, score_level, keyword FROM scoring_criteria
+                WHERE config = ? ORDER BY flywheel_group, score_level DESC, keyword
+            """, (_config,)).fetchall()
+            conn.close()
+            try:
+                config_meta = importlib.import_module(f"configs.{_config}")
+                category_groups = getattr(config_meta, "CATEGORY_GROUPS", {})
+            except ImportError:
+                category_groups = {}
+            groups = []
+            for g in category_groups.values():
+                if g not in groups:
+                    groups.append(g)
+            self.send_json({"groups": groups, "criteria": [dict(r) for r in rows]})
+            return
+
         if path == "/api/export":
             conn = get_conn()
             rows = conn.execute("""
@@ -206,6 +232,55 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"ok": True, "updated": len(ids)})
             return
 
+        if parsed.path == "/api/scoring-criteria":
+            group   = (body.get("flywheel_group") or "").strip()
+            level   = body.get("score_level")
+            keyword = (body.get("keyword") or "").strip().lower()
+            if not group or level not in (2, 3, 4, 5) or not keyword:
+                self.send_json({"error": "flywheel_group, score_level (2-5), and keyword required"}, 400)
+                return
+            from core.scorer import ensure_scoring_criteria_table
+            conn = get_conn()
+            ensure_scoring_criteria_table(conn)
+            conn.execute("""
+                INSERT OR IGNORE INTO scoring_criteria (config, flywheel_group, score_level, keyword)
+                VALUES (?,?,?,?)
+            """, (_config, group, level, keyword))
+            conn.commit()
+            conn.close()
+            self.send_json({"ok": True})
+            return
+
+        if parsed.path == "/api/scoring-criteria/delete":
+            crit_id = body.get("id")
+            if not crit_id:
+                self.send_json({"error": "id required"}, 400)
+                return
+            conn = get_conn()
+            conn.execute("DELETE FROM scoring_criteria WHERE id = ? AND config = ?", (crit_id, _config))
+            conn.commit()
+            conn.close()
+            self.send_json({"ok": True})
+            return
+
+        if parsed.path == "/api/rescore":
+            from core.scorer import score_article
+            conn = get_conn()
+            rows = conn.execute(
+                "SELECT id, title, summary, category, relevance_score FROM articles WHERE config = ?",
+                (_config,)
+            ).fetchall()
+            changed = 0
+            for r in rows:
+                new_score, _ = score_article(r["title"], r["summary"] or "", r["category"], _config, conn)
+                if new_score != r["relevance_score"]:
+                    conn.execute("UPDATE articles SET relevance_score = ? WHERE id = ?", (new_score, r["id"]))
+                    changed += 1
+            conn.commit()
+            conn.close()
+            self.send_json({"ok": True, "rescored": len(rows), "changed": changed})
+            return
+
         self.send_response(404)
         self.end_headers()
 
@@ -226,6 +301,11 @@ def main():
         init_db(conn)
         conn.close()
         print(f"  Created new database. Run aggregator.py --config {_config} to populate it.")
+
+    from core.scorer import seed_scoring_criteria_if_empty
+    seed_conn = sqlite3.connect(DB_PATH)
+    seed_scoring_criteria_if_empty(seed_conn, _config)
+    seed_conn.close()
 
     try:
         config_meta = importlib.import_module(f"configs.{_config}")

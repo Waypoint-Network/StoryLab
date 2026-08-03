@@ -44,13 +44,95 @@ def classify_story_type(title: str, summary: str) -> str:
     return _STORY_TYPE_DEFAULT
 
 
-def score_article(title: str, summary: str, category: str, config: str) -> tuple[int, str]:
-    """Return (relevance_score 1-5, story_type) for an article."""
+def ensure_scoring_criteria_table(conn):
+    """Editable scoring criteria live here instead of in Python source, so
+    the dashboard's Scoring Criteria panel can add/remove them without
+    touching code. Only used by configs that define CATEGORY_GROUPS
+    (currently fan_atlas_insiders) -- other configs keep scoring entirely
+    in their scoring_rules.py, untouched."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS scoring_criteria (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            config          TEXT    NOT NULL,
+            flywheel_group  TEXT    NOT NULL,
+            score_level     INTEGER NOT NULL,
+            keyword         TEXT    NOT NULL,
+            UNIQUE(config, flywheel_group, score_level, keyword)
+        )
+    """)
+    conn.commit()
+
+
+def seed_scoring_criteria_if_empty(conn, config):
+    """One-time population from configs/{config}/scoring_rules.py's
+    SEED_CRITERIA, only if the table has no rows yet for this config.
+    After that, the DB is the source of truth -- this never overwrites
+    rows a user has already added or removed."""
+    ensure_scoring_criteria_table(conn)
+    existing = conn.execute(
+        "SELECT COUNT(*) FROM scoring_criteria WHERE config = ?", (config,)
+    ).fetchone()[0]
+    if existing:
+        return
+    try:
+        rules_mod = importlib.import_module(f"configs.{config}.scoring_rules")
+        seed = getattr(rules_mod, "SEED_CRITERIA", [])
+    except ImportError:
+        seed = []
+    if not seed:
+        return
+    conn.executemany(
+        "INSERT OR IGNORE INTO scoring_criteria (config, flywheel_group, score_level, keyword) VALUES (?,?,?,?)",
+        [(config, group, level, keyword) for group, level, keyword in seed],
+    )
+    conn.commit()
+
+
+def _score_from_criteria(conn, title, summary, category, config, category_groups):
+    """Look up the article's flywheel group from its raw category, then
+    check that group's editable criteria highest score first. Returns
+    None if the category isn't mapped to any group (caller should fall
+    back to the config's scoring_rules.score())."""
+    group = category_groups.get(category)
+    if not group:
+        return None
+    text = (title + " " + (summary or "")).lower()
+    rows = conn.execute("""
+        SELECT score_level, keyword FROM scoring_criteria
+        WHERE config = ? AND flywheel_group = ?
+        ORDER BY score_level DESC
+    """, (config, group)).fetchall()
+    for level, keyword in rows:
+        if keyword.lower() in text:
+            return level
+    return 1
+
+
+def score_article(title: str, summary: str, category: str, config: str, conn=None) -> tuple[int, str]:
+    """Return (relevance_score 1-5, story_type) for an article.
+
+    If the config defines CATEGORY_GROUPS and a DB connection is passed,
+    scoring uses the editable scoring_criteria table, scoped to the
+    article's flywheel group. Otherwise falls back to the config's
+    scoring_rules.score() (its original flat keyword ladder)."""
+    story_type = classify_story_type(title, summary)
+
+    try:
+        config_meta = importlib.import_module(f"configs.{config}")
+        category_groups = getattr(config_meta, "CATEGORY_GROUPS", None)
+    except ImportError:
+        category_groups = None
+
+    if category_groups and conn is not None:
+        seed_scoring_criteria_if_empty(conn, config)
+        score = _score_from_criteria(conn, title, summary, category, config, category_groups)
+        if score is not None:
+            return score, story_type
+
     try:
         rules_mod = importlib.import_module(f"configs.{config}.scoring_rules")
         score = rules_mod.score(title, summary, category)
     except Exception:
         score = 2
 
-    story_type = classify_story_type(title, summary)
     return score, story_type

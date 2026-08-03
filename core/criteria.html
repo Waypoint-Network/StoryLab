@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>StoryLab — Scoring Criteria</title>
+<style>
+  :root {
+    --navy:    #0D1B3E;
+    --amber:   #E8A020;
+    --cream:   #F8F6F1;
+    --green:   #1A6B3A;
+    --purple:  #5E1B8C;
+    --gray:    #E8E6E1;
+    --text:    #1A1A2E;
+    --muted:   #888;
+    --score5:  #1A6B3A;
+    --score4:  #2E7D32;
+    --score3:  #F57F17;
+    --score2:  #BF360C;
+    --score1:  #9E9E9E;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Inter", system-ui, sans-serif; background: var(--cream); color: var(--text); font-size: 14px; }
+
+  header {
+    background: var(--navy); color: #fff; padding: 12px 24px;
+    display: flex; align-items: center; justify-content: space-between;
+    position: sticky; top: 0; z-index: 100; box-shadow: 0 2px 8px rgba(0,0,0,.3);
+  }
+  header .logo { font-size: 18px; font-weight: 700; letter-spacing: .03em; }
+  header .logo span { color: var(--amber); }
+  header a.back-link {
+    color: rgba(255,255,255,.8); text-decoration: none; font-size: 12px;
+    font-weight: 600; border: 1.5px solid rgba(255,255,255,.3); border-radius: 20px;
+    padding: 5px 14px;
+  }
+  header a.back-link:hover { border-color: #fff; color: #fff; }
+
+  main { max-width: 1100px; margin: 0 auto; padding: 20px 24px 60px; }
+  .intro { color: var(--muted); font-size: 13px; margin-bottom: 20px; line-height: 1.5; }
+
+  .group-card {
+    background: #fff; border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,.07);
+    margin-bottom: 20px; overflow: hidden;
+  }
+  .group-header {
+    padding: 14px 20px; background: var(--navy); color: #fff;
+    font-size: 15px; font-weight: 700;
+  }
+  .group-body { padding: 16px 20px; }
+
+  .level-row { display: flex; gap: 14px; align-items: flex-start; padding: 10px 0; border-bottom: 1px solid var(--gray); }
+  .level-row:last-of-type { border-bottom: none; }
+  .level-label {
+    width: 108px; flex-shrink: 0; font-size: 11px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .05em; padding-top: 5px;
+  }
+  .level-5 .level-label { color: var(--score5); }
+  .level-4 .level-label { color: var(--score4); }
+  .level-3 .level-label { color: var(--score3); }
+  .level-2 .level-label { color: var(--score2); }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; align-items: center; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--cream); border: 1px solid var(--gray); border-radius: 14px;
+    padding: 3px 6px 3px 12px; font-size: 12px;
+  }
+  .chip button {
+    border: none; background: none; color: var(--muted); font-size: 13px;
+    cursor: pointer; width: 18px; height: 18px; border-radius: 50%; line-height: 1;
+  }
+  .chip button:hover { background: #ddd; color: var(--text); }
+  .chip-empty { color: var(--muted); font-size: 12px; font-style: italic; }
+
+  .fallback-row { padding: 10px 0; color: var(--muted); font-size: 12px; }
+
+  .add-form {
+    display: flex; gap: 8px; margin-top: 14px; padding-top: 14px; border-top: 1px dashed var(--gray);
+  }
+  .add-form input[type=text] {
+    flex: 1; padding: 7px 12px; border: 1.5px solid var(--gray); border-radius: 8px;
+    font-size: 13px; outline: none;
+  }
+  .add-form input[type=text]:focus { border-color: var(--amber); }
+  .add-form select {
+    padding: 7px 10px; border: 1.5px solid var(--gray); border-radius: 8px;
+    font-size: 13px; background: #fff;
+  }
+  .add-form button {
+    padding: 7px 16px; border-radius: 8px; border: none; background: var(--amber);
+    color: var(--navy); font-weight: 700; font-size: 12px; cursor: pointer; white-space: nowrap;
+  }
+  .add-form button:hover { background: #d4910d; }
+
+  .rescore-card {
+    background: #fff; border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,.07);
+    padding: 20px; margin-top: 8px;
+  }
+  .rescore-card h3 { font-size: 14px; margin-bottom: 6px; }
+  .rescore-card p { color: var(--muted); font-size: 12px; margin-bottom: 14px; line-height: 1.5; }
+  .rescore-btn {
+    padding: 10px 18px; border-radius: 8px; border: none; background: var(--navy);
+    color: #fff; font-weight: 700; font-size: 13px; cursor: pointer;
+  }
+  .rescore-btn:hover { background: #16265a; }
+  .rescore-btn:disabled { opacity: .6; cursor: default; }
+  #rescoreStatus { margin-top: 10px; font-size: 13px; color: var(--green); font-weight: 600; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">STORY<span>LAB</span> — Scoring Criteria</div>
+  <a class="back-link" href="/">← Back to Dashboard</a>
+</header>
+
+<main>
+  <p class="intro">
+    Each flywheel category scores articles independently. A keyword only
+    applies within its own category — adding "brand deal" under Mobilizer
+    won't affect how Product articles score. Score 1 needs no keywords —
+    it's what an article gets when nothing else matches. Changes here only
+    affect newly fetched articles until you press <strong>Re-score existing
+    articles</strong> below.
+  </p>
+
+  <div id="groups"></div>
+
+  <div class="rescore-card">
+    <h3>Re-score existing articles</h3>
+    <p>
+      Re-runs the criteria above against every article already in this
+      config and updates its score. This overwrites current scores — there's
+      no undo. New/deleted keywords don't affect existing articles until you
+      run this.
+    </p>
+    <button class="rescore-btn" id="rescoreBtn">Re-score existing articles →</button>
+    <div id="rescoreStatus"></div>
+  </div>
+</main>
+
+<script>
+const LEVELS = [5, 4, 3, 2];
+let state = { groups: [], criteria: [] };
+
+async function api(path, method = "GET", body = null) {
+  const opts = { method, headers: { "Content-Type": "application/json" } };
+  if (body) opts.body = JSON.stringify(body);
+  const r = await fetch(path, opts);
+  return r.json();
+}
+
+async function load() {
+  state = await api("/api/scoring-criteria");
+  render();
+}
+
+function render() {
+  const container = document.getElementById("groups");
+  container.innerHTML = "";
+
+  state.groups.forEach(group => {
+    const card = document.createElement("div");
+    card.className = "group-card";
+
+    const rowsHtml = LEVELS.map(level => {
+      const items = state.criteria.filter(c => c.flywheel_group === group && c.score_level === level);
+      const chips = items.length
+        ? items.map(c => `
+            <span class="chip" data-id="${c.id}">
+              ${c.keyword}
+              <button data-id="${c.id}" title="Remove">×</button>
+            </span>
+          `).join("")
+        : `<span class="chip-empty">No keywords yet</span>`;
+      return `
+        <div class="level-row level-${level}">
+          <div class="level-label">Score ${level}</div>
+          <div class="chips">${chips}</div>
+        </div>
+      `;
+    }).join("");
+
+    card.innerHTML = `
+      <div class="group-header">${group}</div>
+      <div class="group-body">
+        ${rowsHtml}
+        <div class="fallback-row">Score 1 — everything else (no keywords needed)</div>
+        <div class="add-form">
+          <input type="text" placeholder="Add a keyword or phrase…" data-group="${group}" />
+          <select data-group-select="${group}">
+            <option value="5">Score 5</option>
+            <option value="4" selected>Score 4</option>
+            <option value="3">Score 3</option>
+            <option value="2">Score 2</option>
+          </select>
+          <button data-add="${group}">Add</button>
+        </div>
+      </div>
+    `;
+    container.appendChild(card);
+  });
+}
+
+document.getElementById("groups").addEventListener("click", async e => {
+  const removeBtn = e.target.closest(".chip button");
+  if (removeBtn) {
+    await api("/api/scoring-criteria/delete", "POST", { id: parseInt(removeBtn.dataset.id) });
+    await load();
+    return;
+  }
+  const addBtn = e.target.closest("button[data-add]");
+  if (addBtn) {
+    const group = addBtn.dataset.add;
+    const input = document.querySelector(`input[data-group="${group}"]`);
+    const select = document.querySelector(`select[data-group-select="${group}"]`);
+    const keyword = input.value.trim();
+    if (!keyword) return;
+    await api("/api/scoring-criteria", "POST", {
+      flywheel_group: group,
+      score_level: parseInt(select.value),
+      keyword,
+    });
+    input.value = "";
+    await load();
+  }
+});
+
+document.getElementById("rescoreBtn").addEventListener("click", async () => {
+  const btn = document.getElementById("rescoreBtn");
+  const status = document.getElementById("rescoreStatus");
+  btn.disabled = true;
+  status.textContent = "Re-scoring…";
+  const result = await api("/api/rescore", "POST", {});
+  btn.disabled = false;
+  status.textContent = `✓ Checked ${result.rescored} articles — updated ${result.changed} score${result.changed !== 1 ? "s" : ""}.`;
+});
+
+load();
+</script>
+</body>
+</html>
