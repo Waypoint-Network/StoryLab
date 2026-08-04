@@ -37,6 +37,7 @@ DB_PATH        = os.path.join(REPO_ROOT, "curation.db")
 HTML_PATH      = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dashboard.html")
 CRITERIA_PATH  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "criteria.html")
 FEEDS_PATH     = os.path.join(os.path.dirname(os.path.abspath(__file__)), "feeds.html")
+SUMMARIES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "summaries.html")
 
 _config = "travel_tech_ux"
 
@@ -91,6 +92,10 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/feeds":
             self.send_html(FEEDS_PATH)
+            return
+
+        if path == "/summaries":
+            self.send_html(SUMMARIES_PATH)
             return
 
         if path == "/api/articles":
@@ -207,6 +212,26 @@ class Handler(BaseHTTPRequestHandler):
                 "category_groups": category_groups,
                 "feeds": [dict(r) for r in rows],
             })
+            return
+
+        if path == "/api/ai-instructions":
+            from core.ai_summary import get_instructions
+            conn = get_conn()
+            instructions = get_instructions(conn, _config)
+            conn.close()
+            self.send_json({"instructions": instructions})
+            return
+
+        if path == "/api/ai-summary":
+            from core.ai_summary import get_latest_summary
+            group = params.get("group", [""])[0]
+            if not group:
+                self.send_json({"error": "group required"}, 400)
+                return
+            conn = get_conn()
+            summary = get_latest_summary(conn, _config, group)
+            conn.close()
+            self.send_json({"summary": summary})
             return
 
         if path == "/api/export":
@@ -354,6 +379,31 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"ok": True, **stats})
             return
 
+        if parsed.path == "/api/ai-instructions":
+            group = (body.get("flywheel_group") or "").strip()
+            text  = body.get("text", "")
+            if not group:
+                self.send_json({"error": "flywheel_group required"}, 400)
+                return
+            from core.ai_summary import save_instructions
+            conn = get_conn()
+            save_instructions(conn, _config, group, text)
+            conn.close()
+            self.send_json({"ok": True})
+            return
+
+        if parsed.path == "/api/generate-summary":
+            group = (body.get("flywheel_group") or "").strip()
+            if not group:
+                self.send_json({"error": "flywheel_group required"}, 400)
+                return
+            from core.ai_summary import generate_summary
+            conn = get_conn()
+            result = generate_summary(conn, _config, group)
+            conn.close()
+            self.send_json(result)
+            return
+
         if parsed.path == "/api/rescore":
             from core.scorer import score_article
             conn = get_conn()
@@ -395,9 +445,11 @@ def main():
 
     from core.scorer import seed_scoring_criteria_if_empty
     from core.aggregator import seed_feeds_if_empty
+    from core.ai_summary import ensure_ai_tables
     seed_conn = sqlite3.connect(DB_PATH)
     seed_scoring_criteria_if_empty(seed_conn, _config)
     seed_feeds_if_empty(seed_conn, _config)
+    ensure_ai_tables(seed_conn)
     seed_conn.close()
 
     try:

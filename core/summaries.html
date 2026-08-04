@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>StoryLab — AI Summaries</title>
+<style>
+  :root {
+    --navy:    #0D1B3E;
+    --amber:   #E8A020;
+    --cream:   #F8F6F1;
+    --green:   #1A6B3A;
+    --purple:  #5E1B8C;
+    --red:     #8B2020;
+    --gray:    #E8E6E1;
+    --text:    #1A1A2E;
+    --muted:   #888;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Inter", system-ui, sans-serif; background: var(--cream); color: var(--text); font-size: 14px; }
+
+  header {
+    background: var(--navy); color: #fff; padding: 12px 24px;
+    display: flex; align-items: center; justify-content: space-between;
+    position: sticky; top: 0; z-index: 100; box-shadow: 0 2px 8px rgba(0,0,0,.3);
+  }
+  header .logo { font-size: 18px; font-weight: 700; letter-spacing: .03em; }
+  header .logo span { color: var(--amber); }
+  header a.back-link {
+    color: rgba(255,255,255,.8); text-decoration: none; font-size: 12px;
+    font-weight: 600; border: 1.5px solid rgba(255,255,255,.3); border-radius: 20px;
+    padding: 5px 14px;
+  }
+  header a.back-link:hover { border-color: #fff; color: #fff; }
+
+  main { max-width: 1100px; margin: 0 auto; padding: 20px 24px 60px; }
+  .intro { color: var(--muted); font-size: 13px; margin-bottom: 20px; line-height: 1.5; }
+  .intro strong { color: var(--text); }
+
+  .group-card {
+    background: #fff; border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,.07);
+    margin-bottom: 24px; overflow: hidden;
+  }
+  .group-header {
+    padding: 14px 20px; background: var(--navy); color: #fff;
+    font-size: 15px; font-weight: 700;
+  }
+  .group-body { padding: 18px 20px; }
+
+  .section-label {
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .05em; color: var(--muted); margin-bottom: 8px; display: block;
+  }
+  .subsection { margin-bottom: 20px; }
+  .subsection:last-child { margin-bottom: 0; }
+
+  textarea.instructions-box {
+    width: 100%; min-height: 70px; padding: 10px 12px; border: 1.5px solid var(--gray);
+    border-radius: 8px; font-size: 13px; font-family: inherit; outline: none; resize: vertical;
+  }
+  textarea.instructions-box:focus { border-color: var(--amber); }
+  .save-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+  .save-btn {
+    padding: 6px 16px; border-radius: 8px; border: none; background: var(--amber);
+    color: var(--navy); font-weight: 700; font-size: 12px; cursor: pointer;
+  }
+  .save-btn:hover { background: #d4910d; }
+  .save-status { font-size: 12px; color: var(--green); font-weight: 600; }
+
+  .generate-row { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+  .generate-btn {
+    padding: 9px 18px; border-radius: 8px; border: none; background: var(--navy);
+    color: #fff; font-weight: 700; font-size: 13px; cursor: pointer; white-space: nowrap;
+  }
+  .generate-btn:hover { background: #16265a; }
+  .generate-btn:disabled { opacity: .6; cursor: default; }
+  .generate-status { font-size: 12px; font-weight: 600; }
+  .generate-status.info { color: var(--muted); }
+  .generate-status.warn { color: #a15c00; }
+
+  .example-badge {
+    display: inline-block; background: #FFF3DC; color: #a15c00; border: 1px solid #F0D8A8;
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+    padding: 3px 9px; border-radius: 10px; margin-bottom: 8px;
+  }
+  .real-badge {
+    display: inline-block; background: #E8F5E9; color: var(--green); border: 1px solid #b8ddc0;
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+    padding: 3px 9px; border-radius: 10px; margin-bottom: 8px;
+  }
+  .content-box {
+    background: var(--cream); border: 1px solid var(--gray); border-radius: 8px;
+    padding: 12px 14px; font-size: 13px; line-height: 1.6; white-space: pre-line;
+  }
+  .rationale-box { border-left: 3px solid var(--purple); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">STORY<span>LAB</span> — AI Summaries</div>
+  <div style="display:flex;align-items:center;gap:12px">
+    <a class="back-link" href="/feeds">📡 Feeds</a>
+    <a class="back-link" href="/criteria">⚙ Scoring Criteria</a>
+    <a class="back-link" href="/">← Back to Dashboard</a>
+  </div>
+</header>
+
+<main>
+  <p class="intro">
+    <strong>The AI isn't running yet.</strong> Everything below is real and
+    saved except the actual AI call — the summaries and rationale you see
+    are clearly marked examples showing how this will look. Standing
+    instructions you write here are saved for real right now. Once an API
+    key is added, "Generate Summaries" will summarize that category's
+    5-star articles for real, using only what's in the source articles —
+    it won't override anything you've set up here.
+  </p>
+
+  <div id="groups"></div>
+</main>
+
+<script>
+const MOCK = {
+  "Institutional": {
+    summary: "• [EXAMPLE] A Power 4 program formalized its NIL collective governance, naming a compliance director and publishing quarterly disclosure standards.\n\n• [EXAMPLE] An athletic department published a case study on its ambassador program, citing a specific increase in fan-travel bookings tied to athlete-led promotion.",
+    rationale: "[EXAMPLE] Surfaced because both describe concrete, operational NIL/ambassador structures rather than trend commentary — the kind of institutional detail this category is meant to prioritize. They matter to Waypoint's Institutional flywheel because they signal which programs have the governance maturity for a deeper commercial conversation."
+  },
+  "Mobilizer": {
+    summary: "• [EXAMPLE] A program's social team published its disclosure and engagement-rate benchmarks for athlete brand deals.\n\n• [EXAMPLE] A grassroots fan-organizing playbook described how a field-director model scaled attendance at away games.",
+    rationale: "[EXAMPLE] Surfaced for concrete organizing mechanics — specific benchmarks and a named field-director structure — rather than general influencer-marketing commentary. Relevant to Mobilizer because it shows a replicable technique for turning fans into active promoters, not just an audience."
+  },
+  "Product": {
+    summary: "• [EXAMPLE] A creator-tools platform shipped a new affiliate-link feature aimed at niche communities.\n\n• [EXAMPLE] A social-commerce report detailed subscriber-growth tactics used by small creator funds.",
+    rationale: "[EXAMPLE] Flagged against a standing instruction to watch for features Waypoint's travel product could add — both describe a concrete, shipped mechanic rather than general market commentary."
+  },
+  "Fan Graph": {
+    summary: "• [EXAMPLE] A sports-culture piece traced how parasocial attachment to a specific athlete correlated with repeat ticket purchases.\n\n• [EXAMPLE] A fandom-psychology study quantified 'sense of belonging' as a predictor of season-ticket renewal.",
+    rationale: "[EXAMPLE] Surfaced because both connect a named psychological mechanism to an actual behavior — ticket purchases, renewals — the kind of specific signal this flywheel category is meant to catch, not generic fandom coverage."
+  },
+};
+
+const PLACEHOLDERS = {
+  "Institutional": "e.g. We're trying to expand Baylor's reach — surface things that would interest their athletic department leadership.",
+  "Mobilizer": "e.g. Flag organizing/mobilization techniques we could adapt for fan-loyalty campaigns.",
+  "Product": "e.g. We're expanding our travel product's capabilities — flag articles about features we could add.",
+  "Fan Graph": "e.g. Surface fandom-psychology findings that could inform how we design loyalty programs.",
+};
+
+let groups = [];
+let instructions = {};
+
+async function api(path, method = "GET", body = null) {
+  const opts = { method, headers: { "Content-Type": "application/json" } };
+  if (body) opts.body = JSON.stringify(body);
+  const r = await fetch(path, opts);
+  return r.json();
+}
+
+async function load() {
+  const instrResp = await api("/api/ai-instructions");
+  instructions = instrResp.instructions || {};
+  groups = Object.keys(instructions);
+  render();
+  groups.forEach(loadSummary);
+}
+
+function render() {
+  const container = document.getElementById("groups");
+  container.innerHTML = groups.map(group => `
+    <div class="group-card" data-group="${group}">
+      <div class="group-header">${group}</div>
+      <div class="group-body">
+        <div class="subsection">
+          <span class="section-label">What to look for</span>
+          <textarea class="instructions-box" data-group="${group}" placeholder="${PLACEHOLDERS[group] || ""}">${instructions[group] || ""}</textarea>
+          <div class="save-row">
+            <button class="save-btn" data-save="${group}">Save Instructions</button>
+            <span class="save-status" data-save-status="${group}"></span>
+          </div>
+        </div>
+
+        <div class="subsection generate-row">
+          <button class="generate-btn" data-generate="${group}">Generate Summaries →</button>
+          <span class="generate-status" data-generate-status="${group}"></span>
+        </div>
+
+        <div class="subsection">
+          <span class="section-label">Summaries</span>
+          <div data-summary-badge="${group}"></div>
+          <div class="content-box" data-summary-content="${group}">Loading…</div>
+        </div>
+
+        <div class="subsection">
+          <span class="section-label">Why these / why it matters</span>
+          <div data-rationale-badge="${group}"></div>
+          <div class="content-box rationale-box" data-rationale-content="${group}">Loading…</div>
+        </div>
+      </div>
+    </div>
+  `).join("");
+}
+
+async function loadSummary(group) {
+  const result = await api("/api/ai-summary?group=" + encodeURIComponent(group));
+  applySummary(group, result.summary);
+}
+
+function applySummary(group, summary) {
+  const summaryBadge = document.querySelector(`[data-summary-badge="${group}"]`);
+  const summaryContent = document.querySelector(`[data-summary-content="${group}"]`);
+  const rationaleBadge = document.querySelector(`[data-rationale-badge="${group}"]`);
+  const rationaleContent = document.querySelector(`[data-rationale-content="${group}"]`);
+
+  if (summary) {
+    const when = new Date(summary.generated_at).toLocaleString();
+    summaryBadge.innerHTML = `<span class="real-badge">Generated ${when}</span>`;
+    summaryContent.textContent = summary.summary_text || "";
+    rationaleBadge.innerHTML = `<span class="real-badge">Generated ${when}</span>`;
+    rationaleContent.textContent = summary.rationale_text || "";
+  } else {
+    const mock = MOCK[group] || { summary: "", rationale: "" };
+    summaryBadge.innerHTML = `<span class="example-badge">🧪 Example — not real AI output</span>`;
+    summaryContent.textContent = mock.summary;
+    rationaleBadge.innerHTML = `<span class="example-badge">🧪 Example — not real AI output</span>`;
+    rationaleContent.textContent = mock.rationale;
+  }
+}
+
+document.getElementById("groups").addEventListener("click", async e => {
+  const saveBtn = e.target.closest("button[data-save]");
+  if (saveBtn) {
+    const group = saveBtn.dataset.save;
+    const textarea = document.querySelector(`textarea[data-group="${group}"]`);
+    const status = document.querySelector(`[data-save-status="${group}"]`);
+    await api("/api/ai-instructions", "POST", { flywheel_group: group, text: textarea.value });
+    status.textContent = "✓ Saved";
+    setTimeout(() => status.textContent = "", 2500);
+    return;
+  }
+
+  const genBtn = e.target.closest("button[data-generate]");
+  if (genBtn) {
+    const group = genBtn.dataset.generate;
+    const status = document.querySelector(`[data-generate-status="${group}"]`);
+    genBtn.disabled = true;
+    status.className = "generate-status info";
+    status.textContent = "Working…";
+    const result = await api("/api/generate-summary", "POST", { flywheel_group: group });
+    genBtn.disabled = false;
+    if (result.ok && result.summary) {
+      status.className = "generate-status info";
+      status.textContent = "";
+      applySummary(group, result.summary);
+    } else {
+      status.className = "generate-status warn";
+      status.textContent = result.message || "Something went wrong.";
+    }
+    return;
+  }
+});
+
+load();
+</script>
+</body>
+</html>
