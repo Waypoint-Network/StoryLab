@@ -20,9 +20,9 @@ import importlib
 import webbrowser
 import threading
 import sys
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
-from datetime import datetime
+from datetime import datetime, timezone
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO_ROOT)
@@ -36,6 +36,7 @@ if hasattr(sys.stdout, "reconfigure"):
 DB_PATH        = os.path.join(REPO_ROOT, "curation.db")
 HTML_PATH      = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dashboard.html")
 CRITERIA_PATH  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "criteria.html")
+FEEDS_PATH     = os.path.join(os.path.dirname(os.path.abspath(__file__)), "feeds.html")
 
 _config = "travel_tech_ux"
 
@@ -86,6 +87,10 @@ class Handler(BaseHTTPRequestHandler):
 
         if path in ("/criteria", "/scoring-criteria"):
             self.send_html(CRITERIA_PATH)
+            return
+
+        if path == "/feeds":
+            self.send_html(FEEDS_PATH)
             return
 
         if path == "/api/articles":
@@ -179,6 +184,31 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"groups": groups, "criteria": [dict(r) for r in rows]})
             return
 
+        if path == "/api/feeds":
+            from core.aggregator import seed_feeds_if_empty
+            conn = get_conn()
+            seed_feeds_if_empty(conn, _config)
+            rows = conn.execute("""
+                SELECT id, label, url, category, added_date FROM feeds
+                WHERE config = ? ORDER BY category, label
+            """, (_config,)).fetchall()
+            conn.close()
+            try:
+                config_meta = importlib.import_module(f"configs.{_config}")
+                category_groups = getattr(config_meta, "CATEGORY_GROUPS", {})
+            except ImportError:
+                category_groups = {}
+            groups = []
+            for g in category_groups.values():
+                if g not in groups:
+                    groups.append(g)
+            self.send_json({
+                "groups": groups,
+                "category_groups": category_groups,
+                "feeds": [dict(r) for r in rows],
+            })
+            return
+
         if path == "/api/export":
             conn = get_conn()
             rows = conn.execute("""
@@ -263,6 +293,67 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"ok": True})
             return
 
+        if parsed.path == "/api/feeds":
+            label    = (body.get("label") or "").strip()
+            url      = (body.get("url") or "").strip()
+            category = (body.get("category") or "").strip()
+            if not label or not url or not category:
+                self.send_json({"error": "label, url, and category required"}, 400)
+                return
+            try:
+                config_meta = importlib.import_module(f"configs.{_config}")
+                category_groups = getattr(config_meta, "CATEGORY_GROUPS", {})
+            except ImportError:
+                category_groups = {}
+            valid_groups = set(category_groups.values())
+            if valid_groups and category not in valid_groups:
+                self.send_json({"error": f"category must be one of: {', '.join(valid_groups)}"}, 400)
+                return
+
+            from core.aggregator import ensure_feeds_table, fetch_one_feed
+            conn = get_conn()
+            ensure_feeds_table(conn)
+            existing = conn.execute(
+                "SELECT id FROM feeds WHERE config = ? AND url = ?", (_config, url)
+            ).fetchone()
+            if existing:
+                conn.close()
+                self.send_json({"error": "This feed URL is already added."}, 400)
+                return
+
+            result = fetch_one_feed(conn, label, url, category, _config)
+            if not result["ok"]:
+                conn.close()
+                self.send_json({"error": f"Couldn't verify this feed: {result['error']}"}, 400)
+                return
+
+            conn.execute(
+                "INSERT INTO feeds (config, label, url, category, added_date) VALUES (?,?,?,?,?)",
+                (_config, label, url, category, datetime.now(timezone.utc).isoformat())
+            )
+            conn.commit()
+            conn.close()
+            self.send_json({"ok": True, "fetched": result["fetched"], "added": result["added"]})
+            return
+
+        if parsed.path == "/api/feeds/delete":
+            feed_id = body.get("id")
+            if not feed_id:
+                self.send_json({"error": "id required"}, 400)
+                return
+            conn = get_conn()
+            conn.execute("DELETE FROM feeds WHERE id = ? AND config = ?", (feed_id, _config))
+            conn.commit()
+            conn.close()
+            self.send_json({"ok": True})
+            return
+
+        if parsed.path == "/api/fetch-now":
+            from core.aggregator import run as run_aggregator
+            stats = run_aggregator(config=_config)
+            self.send_json({"ok": True, **stats})
+            return
+
         if parsed.path == "/api/rescore":
             from core.scorer import score_article
             conn = get_conn()
@@ -303,8 +394,10 @@ def main():
         print(f"  Created new database. Run aggregator.py --config {_config} to populate it.")
 
     from core.scorer import seed_scoring_criteria_if_empty
+    from core.aggregator import seed_feeds_if_empty
     seed_conn = sqlite3.connect(DB_PATH)
     seed_scoring_criteria_if_empty(seed_conn, _config)
+    seed_feeds_if_empty(seed_conn, _config)
     seed_conn.close()
 
     try:
@@ -321,7 +414,7 @@ def main():
     if not args.no_open:
         threading.Timer(0.8, lambda: webbrowser.open(url)).start()
 
-    server = HTTPServer(("localhost", args.port), Handler)
+    server = ThreadingHTTPServer(("localhost", args.port), Handler)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

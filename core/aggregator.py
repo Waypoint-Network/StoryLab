@@ -248,93 +248,175 @@ def too_old(pub_str, max_days):
         return False
 
 
+def ensure_feeds_table(conn):
+    """Editable feed list lives here instead of in Python source, so the
+    dashboard's Feeds panel can add/remove feeds without touching code.
+    Only used by configs that have been migrated (see seed_feeds_if_empty)
+    -- unmigrated configs keep reading configs/{config}/feeds.py as before."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS feeds (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            config      TEXT    NOT NULL,
+            label       TEXT    NOT NULL,
+            url         TEXT    NOT NULL,
+            category    TEXT    NOT NULL,
+            added_date  TEXT,
+            UNIQUE(config, url)
+        )
+    """)
+    conn.commit()
+
+
+def seed_feeds_if_empty(conn, config):
+    """One-time copy of configs/{config}/feeds.py's FEEDS list into the DB,
+    only if the table has no rows yet for this config. feeds.py itself is
+    never modified -- it just stops being read once the table is
+    populated, and stays as a historical reference."""
+    ensure_feeds_table(conn)
+    existing = conn.execute(
+        "SELECT COUNT(*) FROM feeds WHERE config = ?", (config,)
+    ).fetchone()[0]
+    if existing:
+        return
+    try:
+        feeds_mod = importlib.import_module(f"configs.{config}.feeds")
+        seed = getattr(feeds_mod, "FEEDS", [])
+    except ImportError:
+        seed = []
+    if not seed:
+        return
+    now = datetime.now(timezone.utc).isoformat()
+    conn.executemany(
+        "INSERT OR IGNORE INTO feeds (config, label, url, category, added_date) VALUES (?,?,?,?,?)",
+        [(config, label, url, category, now) for label, url, category, *_ in seed],
+    )
+    conn.commit()
+
+
+def get_active_feeds(conn, config):
+    """Returns [(label, url, category, notes), ...] -- from the DB if this
+    config has been migrated (has rows in `feeds`), otherwise falls back to
+    configs/{config}/feeds.py's FEEDS list, unchanged."""
+    ensure_feeds_table(conn)
+    rows = conn.execute(
+        "SELECT label, url, category FROM feeds WHERE config = ? ORDER BY category, label",
+        (config,)
+    ).fetchall()
+    if rows:
+        return [(r[0], r[1], r[2], "") for r in rows]
+    feeds_mod = importlib.import_module(f"configs.{config}.feeds")
+    return list(feeds_mod.FEEDS)
+
+
+def fetch_one_feed(conn, label, url, category, config, max_days=MAX_DAYS, dry_run=False):
+    """Fetch, parse, score, and insert one feed's articles. Used both by
+    run()'s batch loop and by the dashboard's 'add feed' verify-and-save
+    action, so verifying a new feed and actually fetching it are the exact
+    same code path -- not a separate, simplified check.
+
+    Returns {"ok": bool, "fetched": int, "added": int, "error": str|None}.
+    """
+    from core.scorer import score_article
+
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        xml_bytes = fetch_feed(url)
+        articles  = detect_and_parse(xml_bytes, label, category)
+    except urllib.error.URLError as e:
+        msg = f"Network error: {e.reason}"
+        conn.execute(
+            "INSERT INTO fetch_log (source,run_at,items_added,config,error) VALUES (?,?,?,?,?)",
+            (label, now, 0, config, msg)
+        )
+        conn.commit()
+        return {"ok": False, "fetched": 0, "added": 0, "error": msg}
+    except Exception as e:
+        msg = str(e)
+        conn.execute(
+            "INSERT INTO fetch_log (source,run_at,items_added,config,error) VALUES (?,?,?,?,?)",
+            (label, now, 0, config, msg)
+        )
+        conn.commit()
+        return {"ok": False, "fetched": 0, "added": 0, "error": msg}
+
+    added = 0
+    for art in articles:
+        if too_old(art["published"], max_days):
+            continue
+        relevance_score, story_type = score_article(
+            art["title"], art["summary"] or "", art["category"], config, conn
+        )
+        if dry_run:
+            added += 1
+            continue
+        try:
+            conn.execute("""
+                INSERT OR IGNORE INTO articles
+                  (url_hash, source, category, title, url, summary,
+                   published_date, fetched_date, relevance_score, story_type, config)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?)
+            """, (
+                art["url_hash"], art["source"], art["category"],
+                art["title"], art["url"], art["summary"],
+                art["published"], now,
+                relevance_score, story_type, config
+            ))
+            if conn.execute("SELECT changes()").fetchone()[0] > 0:
+                added += 1
+        except sqlite3.Error:
+            pass
+
+    conn.commit()
+    conn.execute(
+        "INSERT INTO fetch_log (source,run_at,items_added,config) VALUES (?,?,?,?)",
+        (label, now, added, config)
+    )
+    conn.commit()
+    return {"ok": True, "fetched": len(articles), "added": added, "error": None}
+
+
 def run(config="travel_tech_ux", dry_run=False, max_days=MAX_DAYS):
     feeds_mod = importlib.import_module(f"configs.{config}.feeds")
-    FEEDS = feeds_mod.FEEDS
     NO_RSS_SOURCES = getattr(feeds_mod, "NO_RSS_SOURCES", [])
 
     config_meta = importlib.import_module(f"configs.{config}")
     display_name = getattr(config_meta, "DISPLAY_NAME", config.capitalize())
 
-    from core.scorer import score_article, seed_scoring_criteria_if_empty
+    from core.scorer import seed_scoring_criteria_if_empty
 
     conn = sqlite3.connect(DB_PATH)
     init_db(conn)
     seed_scoring_criteria_if_empty(conn, config)
-
-    total_added = 0
-    now = datetime.now(timezone.utc).isoformat()
+    seed_feeds_if_empty(conn, config)
 
     print(f"\n{'='*60}")
     print(f"  StoryLab Aggregator — {display_name}")
-    print(f"  Run: {now[:19]}Z")
+    print(f"  Run: {datetime.now(timezone.utc).isoformat()[:19]}Z")
     print(f"{'='*60}\n")
 
-    all_feeds = list(FEEDS)
+    all_feeds = get_active_feeds(conn, config)
     for src in NO_RSS_SOURCES:
         ktn = src.get("kill_the_newsletter_feed", "").strip()
         if ktn:
             all_feeds.append((src["name"], ktn, "email-newsletter", src.get("notes", "")))
 
+    stats = {"feeds_attempted": len(all_feeds), "feeds_succeeded": 0, "articles_added": 0}
+
     for label, url, category, notes in all_feeds:
         print(f"  [{category}] {label}")
-        try:
-            xml_bytes = fetch_feed(url)
-            articles  = detect_and_parse(xml_bytes, label, category)
-            added = 0
-            for art in articles:
-                if too_old(art["published"], max_days):
-                    continue
-                relevance_score, story_type = score_article(
-                    art["title"], art["summary"] or "", art["category"], config, conn
-                )
-                if dry_run:
-                    print(f"      [{relevance_score}★ {story_type}] {art['title'][:60]}")
-                    added += 1
-                    continue
-                try:
-                    conn.execute("""
-                        INSERT OR IGNORE INTO articles
-                          (url_hash, source, category, title, url, summary,
-                           published_date, fetched_date, relevance_score, story_type, config)
-                        VALUES (?,?,?,?,?,?,?,?,?,?,?)
-                    """, (
-                        art["url_hash"], art["source"], art["category"],
-                        art["title"], art["url"], art["summary"],
-                        art["published"], now,
-                        relevance_score, story_type, config
-                    ))
-                    if conn.execute("SELECT changes()").fetchone()[0] > 0:
-                        added += 1
-                except sqlite3.Error as e:
-                    print(f"      DB error: {e}")
-            conn.commit()
-            print(f"      ✓ {len(articles)} fetched, {added} new added")
-            conn.execute(
-                "INSERT INTO fetch_log (source,run_at,items_added,config) VALUES (?,?,?,?)",
-                (label, now, added, config)
-            )
-            total_added += added
-        except urllib.error.URLError as e:
-            msg = f"Network error: {e.reason}"
-            print(f"      ✗ {msg}")
-            conn.execute(
-                "INSERT INTO fetch_log (source,run_at,items_added,config,error) VALUES (?,?,?,?,?)",
-                (label, now, 0, config, msg)
-            )
-        except Exception as e:
-            msg = str(e)
-            print(f"      ✗ {msg}")
-            conn.execute(
-                "INSERT INTO fetch_log (source,run_at,items_added,config,error) VALUES (?,?,?,?,?)",
-                (label, now, 0, config, msg)
-            )
-        conn.commit()
+        result = fetch_one_feed(conn, label, url, category, config, max_days=max_days, dry_run=dry_run)
+        if result["ok"]:
+            print(f"      ✓ {result['fetched']} fetched, {result['added']} new added")
+            stats["feeds_succeeded"] += 1
+            stats["articles_added"] += result["added"]
+        else:
+            print(f"      ✗ {result['error']}")
 
     print(f"\n{'='*60}")
-    print(f"  Total new articles added: {total_added}")
+    print(f"  Total new articles added: {stats['articles_added']}")
     print(f"{'='*60}\n")
     conn.close()
+    return stats
 
 
 if __name__ == "__main__":

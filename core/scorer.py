@@ -94,6 +94,11 @@ def _score_from_criteria(conn, title, summary, category, config, category_groups
     None if the category isn't mapped to any group (caller should fall
     back to the config's scoring_rules.score())."""
     group = category_groups.get(category)
+    if not group and category in category_groups.values():
+        # Feeds added directly through the Feeds panel are tagged with the
+        # flywheel group name itself (e.g. "Mobilizer"), not one of the
+        # legacy raw category keys -- treat that as already being the group.
+        group = category
     if not group:
         return None
     text = (title + " " + (summary or "")).lower()

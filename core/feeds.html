@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>StoryLab — Feeds</title>
+<style>
+  :root {
+    --navy:    #0D1B3E;
+    --amber:   #E8A020;
+    --cream:   #F8F6F1;
+    --green:   #1A6B3A;
+    --red:     #8B2020;
+    --gray:    #E8E6E1;
+    --text:    #1A1A2E;
+    --muted:   #888;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Inter", system-ui, sans-serif; background: var(--cream); color: var(--text); font-size: 14px; }
+
+  header {
+    background: var(--navy); color: #fff; padding: 12px 24px;
+    display: flex; align-items: center; justify-content: space-between;
+    position: sticky; top: 0; z-index: 100; box-shadow: 0 2px 8px rgba(0,0,0,.3);
+  }
+  header .logo { font-size: 18px; font-weight: 700; letter-spacing: .03em; }
+  header .logo span { color: var(--amber); }
+  header a.back-link {
+    color: rgba(255,255,255,.8); text-decoration: none; font-size: 12px;
+    font-weight: 600; border: 1.5px solid rgba(255,255,255,.3); border-radius: 20px;
+    padding: 5px 14px;
+  }
+  header a.back-link:hover { border-color: #fff; color: #fff; }
+
+  main { max-width: 1000px; margin: 0 auto; padding: 20px 24px 60px; }
+  .intro { color: var(--muted); font-size: 13px; margin-bottom: 20px; line-height: 1.5; }
+
+  .card {
+    background: #fff; border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,.07);
+    margin-bottom: 20px; overflow: hidden;
+  }
+  .card-header {
+    padding: 14px 20px; background: var(--navy); color: #fff;
+    font-size: 15px; font-weight: 700;
+  }
+  .card-body { padding: 16px 20px; }
+
+  .feed-row {
+    display: flex; align-items: center; gap: 12px; padding: 10px 0;
+    border-bottom: 1px solid var(--gray);
+  }
+  .feed-row:last-of-type { border-bottom: none; }
+  .feed-info { flex: 1; min-width: 0; }
+  .feed-label { font-weight: 600; font-size: 13px; }
+  .feed-url {
+    font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis; display: block;
+  }
+  .feed-empty { color: var(--muted); font-size: 12px; font-style: italic; padding: 6px 0; }
+  .remove-btn {
+    border: 1.5px solid var(--gray); background: #fff; color: var(--muted);
+    border-radius: 14px; padding: 4px 12px; font-size: 11px; font-weight: 600;
+    cursor: pointer; white-space: nowrap;
+  }
+  .remove-btn:hover { border-color: var(--red); color: var(--red); }
+
+  .add-card { background: #fff; border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,.07); padding: 20px; margin-bottom: 20px; }
+  .add-card h3 { font-size: 14px; margin-bottom: 14px; }
+  .field-row { margin-bottom: 12px; }
+  .field-row label { display: block; font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .05em; color: var(--muted); margin-bottom: 5px; }
+  .field-row input[type=text] {
+    width: 100%; padding: 8px 12px; border: 1.5px solid var(--gray); border-radius: 8px;
+    font-size: 13px; outline: none;
+  }
+  .field-row input[type=text]:focus { border-color: var(--amber); }
+  .category-picker { display: flex; gap: 8px; flex-wrap: wrap; }
+  .category-btn {
+    padding: 7px 16px; border-radius: 20px; border: 1.5px solid var(--gray);
+    background: #fff; cursor: pointer; font-size: 12px; font-weight: 600;
+  }
+  .category-btn.selected { background: var(--navy); color: #fff; border-color: var(--navy); }
+  .add-submit-btn {
+    padding: 9px 18px; border-radius: 8px; border: none; background: var(--amber);
+    color: var(--navy); font-weight: 700; font-size: 13px; cursor: pointer; margin-top: 6px;
+  }
+  .add-submit-btn:hover { background: #d4910d; }
+  .add-submit-btn:disabled { opacity: .6; cursor: default; }
+  #addStatus { margin-top: 10px; font-size: 13px; font-weight: 600; }
+  #addStatus.ok { color: var(--green); }
+  #addStatus.err { color: var(--red); }
+
+  .fetch-card {
+    background: #fff; border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,.07);
+    padding: 20px;
+  }
+  .fetch-card h3 { font-size: 14px; margin-bottom: 6px; }
+  .fetch-card p { color: var(--muted); font-size: 12px; margin-bottom: 14px; line-height: 1.5; }
+  .fetch-btn {
+    padding: 10px 18px; border-radius: 8px; border: none; background: var(--navy);
+    color: #fff; font-weight: 700; font-size: 13px; cursor: pointer;
+  }
+  .fetch-btn:hover { background: #16265a; }
+  .fetch-btn:disabled { opacity: .6; cursor: default; }
+  #fetchStatus { margin-top: 10px; font-size: 13px; color: var(--green); font-weight: 600; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">STORY<span>LAB</span> — Feeds</div>
+  <div style="display:flex;align-items:center;gap:12px">
+    <a class="back-link" href="/criteria">⚙ Scoring Criteria</a>
+    <a class="back-link" href="/">← Back to Dashboard</a>
+  </div>
+</header>
+
+<main>
+  <p class="intro">
+    Add a feed by pasting its URL and picking which flywheel category it
+    belongs to. It's checked live before saving — a dead or invalid URL
+    won't be added — and whatever it finds gets pulled in right away.
+    Removing a feed only stops future fetches; articles already pulled
+    from it stay put.
+  </p>
+
+  <div class="add-card">
+    <h3>Add a feed</h3>
+    <div class="field-row">
+      <label>Feed name</label>
+      <input type="text" id="feedLabel" placeholder="e.g. Sportico" />
+    </div>
+    <div class="field-row">
+      <label>Feed URL</label>
+      <input type="text" id="feedUrl" placeholder="https://example.com/feed/" />
+    </div>
+    <div class="field-row">
+      <label>Flywheel category</label>
+      <div class="category-picker" id="categoryPicker"></div>
+    </div>
+    <button class="add-submit-btn" id="addBtn">Verify &amp; Add Feed →</button>
+    <div id="addStatus"></div>
+  </div>
+
+  <div id="groups"></div>
+
+  <div class="fetch-card">
+    <h3>Fetch now</h3>
+    <p>Pulls fresh articles from every feed above right now, instead of waiting for the next scheduled run.</p>
+    <button class="fetch-btn" id="fetchBtn">Fetch now →</button>
+    <div id="fetchStatus"></div>
+  </div>
+</main>
+
+<script>
+let state = { groups: [], feeds: [], category_groups: {} };
+let selectedCategory = null;
+
+async function api(path, method = "GET", body = null) {
+  const opts = { method, headers: { "Content-Type": "application/json" } };
+  if (body) opts.body = JSON.stringify(body);
+  const r = await fetch(path, opts);
+  return r.json();
+}
+
+async function load() {
+  state = await api("/api/feeds");
+  if (!selectedCategory && state.groups.length) selectedCategory = state.groups[0];
+  renderPicker();
+  renderGroups();
+}
+
+function renderPicker() {
+  const picker = document.getElementById("categoryPicker");
+  picker.innerHTML = state.groups.map(g => `
+    <button type="button" class="category-btn ${g === selectedCategory ? "selected" : ""}" data-category="${g}">${g}</button>
+  `).join("");
+}
+
+function renderGroups() {
+  const container = document.getElementById("groups");
+  container.innerHTML = "";
+  state.groups.forEach(group => {
+    const items = state.feeds.filter(f => (state.category_groups[f.category] || f.category) === group);
+    const card = document.createElement("div");
+    card.className = "card";
+    const rows = items.length
+      ? items.map(f => `
+          <div class="feed-row" data-id="${f.id}">
+            <div class="feed-info">
+              <span class="feed-label">${f.label}</span>
+              <span class="feed-url">${f.url}</span>
+            </div>
+            <button class="remove-btn" data-id="${f.id}">Remove</button>
+          </div>
+        `).join("")
+      : `<div class="feed-empty">No feeds in this category yet.</div>`;
+    card.innerHTML = `
+      <div class="card-header">${group} <span style="opacity:.6;font-weight:400">(${items.length})</span></div>
+      <div class="card-body">${rows}</div>
+    `;
+    container.appendChild(card);
+  });
+}
+
+document.getElementById("categoryPicker").addEventListener("click", e => {
+  const btn = e.target.closest(".category-btn");
+  if (!btn) return;
+  selectedCategory = btn.dataset.category;
+  renderPicker();
+});
+
+document.getElementById("groups").addEventListener("click", async e => {
+  const btn = e.target.closest(".remove-btn");
+  if (!btn) return;
+  await api("/api/feeds/delete", "POST", { id: parseInt(btn.dataset.id) });
+  await load();
+});
+
+document.getElementById("addBtn").addEventListener("click", async () => {
+  const label = document.getElementById("feedLabel").value.trim();
+  const url = document.getElementById("feedUrl").value.trim();
+  const status = document.getElementById("addStatus");
+  const btn = document.getElementById("addBtn");
+
+  if (!label || !url || !selectedCategory) {
+    status.className = "err";
+    status.textContent = "Name, URL, and a category are all required.";
+    return;
+  }
+
+  btn.disabled = true;
+  status.className = "";
+  status.textContent = "Verifying feed…";
+
+  const result = await api("/api/feeds", "POST", { label, url, category: selectedCategory });
+  btn.disabled = false;
+
+  if (result.error) {
+    status.className = "err";
+    status.textContent = "✗ " + result.error;
+    return;
+  }
+
+  status.className = "ok";
+  status.textContent = `✓ Verified — fetched ${result.fetched}, added ${result.added} new articles.`;
+  document.getElementById("feedLabel").value = "";
+  document.getElementById("feedUrl").value = "";
+  await load();
+});
+
+document.getElementById("fetchBtn").addEventListener("click", async () => {
+  const btn = document.getElementById("fetchBtn");
+  const status = document.getElementById("fetchStatus");
+  btn.disabled = true;
+  status.textContent = "Fetching from all feeds — this can take a minute…";
+  const result = await api("/api/fetch-now", "POST", {});
+  btn.disabled = false;
+  status.textContent = `✓ Checked ${result.feeds_attempted} feeds — ${result.feeds_succeeded} succeeded, ${result.articles_added} new article${result.articles_added !== 1 ? "s" : ""} added.`;
+  await load();
+});
+
+load();
+</script>
+</body>
+</html>
