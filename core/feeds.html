@@ -103,6 +103,41 @@
   .fetch-btn:hover { background: #16265a; }
   .fetch-btn:disabled { opacity: .6; cursor: default; }
   #fetchStatus { margin-top: 10px; font-size: 13px; color: var(--green); font-weight: 600; }
+
+  .schedule-card {
+    background: #fff; border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,.07);
+    padding: 20px; margin-bottom: 20px;
+  }
+  .schedule-card h3 { font-size: 14px; margin-bottom: 6px; }
+  .schedule-card > p { color: var(--muted); font-size: 12px; margin-bottom: 14px; line-height: 1.5; }
+  .schedule-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+  .toggle-switch {
+    position: relative; width: 40px; height: 22px; flex-shrink: 0; cursor: pointer;
+  }
+  .toggle-switch input { opacity: 0; width: 0; height: 0; }
+  .toggle-track {
+    position: absolute; inset: 0; background: var(--gray); border-radius: 22px; transition: background .15s;
+  }
+  .toggle-track::after {
+    content: ""; position: absolute; width: 16px; height: 16px; left: 3px; top: 3px;
+    background: #fff; border-radius: 50%; transition: transform .15s;
+  }
+  .toggle-switch input:checked + .toggle-track { background: var(--green); }
+  .toggle-switch input:checked + .toggle-track::after { transform: translateX(18px); }
+  .schedule-row label.toggle-label { font-size: 13px; font-weight: 600; }
+  .schedule-row input[type=number] {
+    width: 64px; padding: 6px 10px; border: 1.5px solid var(--gray); border-radius: 8px; font-size: 13px;
+  }
+  .schedule-row select {
+    padding: 6px 10px; border: 1.5px solid var(--gray); border-radius: 8px; font-size: 13px; background: #fff;
+  }
+  .schedule-save-btn {
+    padding: 7px 16px; border-radius: 8px; border: none; background: var(--amber);
+    color: var(--navy); font-weight: 700; font-size: 12px; cursor: pointer;
+  }
+  .schedule-save-btn:hover { background: #d4910d; }
+  #scheduleLastRun { font-size: 12px; color: var(--muted); }
+  #scheduleStatus { font-size: 12px; color: var(--green); font-weight: 600; margin-top: 8px; }
 </style>
 </head>
 <body>
@@ -150,6 +185,36 @@
     <p>Pulls fresh articles from every feed above right now, instead of waiting for the next scheduled run.</p>
     <button class="fetch-btn" id="fetchBtn">Fetch now →</button>
     <div id="fetchStatus"></div>
+  </div>
+
+  <div class="schedule-card">
+    <h3>Scheduled fetching</h3>
+    <p>
+      Automatically fetches on the interval below — but only while this
+      dashboard's server is running. If you close it, scheduled fetching
+      pauses until you reopen it; it's not a background service. For
+      guaranteed daily fetching regardless of whether the dashboard is
+      open, ask about setting up Windows Task Scheduler instead.
+    </p>
+    <div class="schedule-row">
+      <label class="toggle-switch">
+        <input type="checkbox" id="scheduleEnabled" />
+        <span class="toggle-track"></span>
+      </label>
+      <span class="toggle-label">Enable scheduled fetching</span>
+    </div>
+    <div class="schedule-row">
+      <span>Every</span>
+      <input type="number" id="scheduleValue" min="1" value="1" />
+      <select id="scheduleUnit">
+        <option value="hours">Hours</option>
+        <option value="days" selected>Days</option>
+        <option value="weeks">Weeks</option>
+      </select>
+      <button class="schedule-save-btn" id="scheduleSaveBtn">Save</button>
+    </div>
+    <div id="scheduleLastRun"></div>
+    <div id="scheduleStatus"></div>
   </div>
 </main>
 
@@ -261,7 +326,37 @@ document.getElementById("fetchBtn").addEventListener("click", async () => {
   await load();
 });
 
+async function loadSchedule() {
+  const schedule = await api("/api/fetch-schedule");
+  document.getElementById("scheduleEnabled").checked = !!schedule.enabled;
+  document.getElementById("scheduleValue").value = schedule.interval_value;
+  document.getElementById("scheduleUnit").value = schedule.interval_unit;
+  const lastRunEl = document.getElementById("scheduleLastRun");
+  lastRunEl.textContent = schedule.last_run
+    ? "Last automatic fetch: " + new Date(schedule.last_run).toLocaleString()
+    : "No automatic fetch has run yet.";
+}
+
+document.getElementById("scheduleSaveBtn").addEventListener("click", async () => {
+  const enabled = document.getElementById("scheduleEnabled").checked;
+  const interval_value = parseInt(document.getElementById("scheduleValue").value);
+  const interval_unit = document.getElementById("scheduleUnit").value;
+  const status = document.getElementById("scheduleStatus");
+
+  if (!interval_value || interval_value < 1) {
+    status.textContent = "Enter a number of 1 or more.";
+    return;
+  }
+
+  await api("/api/fetch-schedule", "POST", { enabled, interval_value, interval_unit });
+  status.textContent = enabled
+    ? `✓ Saved — will fetch every ${interval_value} ${interval_unit}.`
+    : "✓ Saved — scheduled fetching is off.";
+  setTimeout(() => status.textContent = "", 3000);
+});
+
 load();
+loadSchedule();
 </script>
 </body>
 </html>

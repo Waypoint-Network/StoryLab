@@ -344,6 +344,8 @@
     <button class="filter-btn leaders-btn" id="leadersBtn" data-active="false">★★★★+ Leaders</button>
   </div>
   <input class="search-box" id="searchBox" placeholder="Search articles, sources…" />
+  <button class="export-btn" id="fetchNowBtn">⟳ Fetch Now</button>
+  <span id="fetchNowStatus" style="font-size:11px;color:var(--muted)"></span>
   <!-- Bulk actions -->
   <button class="bulk-btn" id="bulkQueueBtn">★ Add to Queue</button>
   <button class="bulk-btn save-btn" id="bulkSaveBtn">Save for Later</button>
@@ -865,6 +867,20 @@ document.getElementById("archiveBtn").addEventListener("click", async () => {
   document.getElementById("archiveTagInput").value = "";
   document.getElementById("archiveBlock").style.display = "none";
   renderArticles(); loadStats();
+});
+
+// ── Fetch Now ──────────────────────────────────────────────────────────────
+document.getElementById("fetchNowBtn").addEventListener("click", async () => {
+  const btn = document.getElementById("fetchNowBtn");
+  const status = document.getElementById("fetchNowStatus");
+  btn.disabled = true;
+  status.textContent = "Fetching — this can take a minute…";
+  const result = await api("/api/fetch-now", "POST", {});
+  btn.disabled = false;
+  status.textContent = `✓ ${result.feeds_succeeded}/${result.feeds_attempted} feeds — ${result.articles_added} new article${result.articles_added !== 1 ? "s" : ""}`;
+  setTimeout(() => status.textContent = "", 6000);
+  loadStats();
+  loadArticles();
 });
 
 // ── Init ───────────────────────────────────────────────────────────────────

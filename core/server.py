@@ -214,6 +214,14 @@ class Handler(BaseHTTPRequestHandler):
             })
             return
 
+        if path == "/api/fetch-schedule":
+            from core.scheduler import get_schedule
+            conn = get_conn()
+            schedule = get_schedule(conn, _config)
+            conn.close()
+            self.send_json(schedule)
+            return
+
         if path == "/api/ai-instructions":
             from core.ai_summary import get_instructions
             conn = get_conn()
@@ -375,8 +383,24 @@ class Handler(BaseHTTPRequestHandler):
 
         if parsed.path == "/api/fetch-now":
             from core.aggregator import run as run_aggregator
-            stats = run_aggregator(config=_config)
+            from core.scheduler import fetch_lock
+            with fetch_lock:
+                stats = run_aggregator(config=_config)
             self.send_json({"ok": True, **stats})
+            return
+
+        if parsed.path == "/api/fetch-schedule":
+            enabled        = body.get("enabled")
+            interval_value = body.get("interval_value")
+            interval_unit  = (body.get("interval_unit") or "").strip()
+            if enabled is None or not interval_value or interval_unit not in ("hours", "days", "weeks"):
+                self.send_json({"error": "enabled, interval_value, and interval_unit (hours/days/weeks) required"}, 400)
+                return
+            from core.scheduler import save_schedule
+            conn = get_conn()
+            save_schedule(conn, _config, enabled, int(interval_value), interval_unit)
+            conn.close()
+            self.send_json({"ok": True})
             return
 
         if parsed.path == "/api/ai-instructions":
@@ -446,10 +470,12 @@ def main():
     from core.scorer import seed_scoring_criteria_if_empty
     from core.aggregator import seed_feeds_if_empty
     from core.ai_summary import ensure_ai_tables
+    from core.scheduler import ensure_schedule_table
     seed_conn = sqlite3.connect(DB_PATH)
     seed_scoring_criteria_if_empty(seed_conn, _config)
     seed_feeds_if_empty(seed_conn, _config)
     ensure_ai_tables(seed_conn)
+    ensure_schedule_table(seed_conn)
     seed_conn.close()
 
     try:
@@ -465,6 +491,15 @@ def main():
 
     if not args.no_open:
         threading.Timer(0.8, lambda: webbrowser.open(url)).start()
+
+    # Scheduled fetching (set from the /feeds page) only runs while this
+    # process is alive -- there's no background service in this app. For
+    # true always-on scheduling regardless of whether the dashboard is
+    # open, wire `python core/aggregator.py --config <name>` into your
+    # OS's own scheduler instead (Windows Task Scheduler / macOS cron)
+    # and leave the in-app schedule below turned off.
+    from core.scheduler import run_scheduler_loop
+    threading.Thread(target=run_scheduler_loop, args=(DB_PATH, _config), daemon=True).start()
 
     server = ThreadingHTTPServer(("localhost", args.port), Handler)
     try:
