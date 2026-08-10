@@ -2,23 +2,23 @@
 """
 core/ai_summary.py — StoryLab AI Category Summaries
 -----------------------------------------------------
-Per-flywheel-category standing instructions ("what to look for") and
-AI-generated summaries of that category's 5-star articles.
+Per-flywheel-category standing instructions ("what to look for"), legacy
+AI-summary scaffolding, and saved source-only Flywheel Intelligence Briefs.
 
 Storage follows the same pattern as scoring_criteria (core/scorer.py) and
 feeds (core/aggregator.py): editable from the dashboard, not code.
 
 STATUS: the actual outbound AI call is not built yet -- generate_summary()
-stops at a clearly marked TODO once it confirms an API key is present.
-Everything else (instructions storage, summary storage, gathering a
-category's 5-star articles, formatting them into fact-bounded source
-capsules) is real and works today. See ADD_API_KEY.md at the repo root
-for what changes when the key is added.
+stops at a clearly marked TODO once it confirms an API key is present. The
+source-only generate_flywheel_brief() workflow is real: it saves a dated,
+fact-bounded brief from current five-star source articles without an AI or
+network call. See ADD_API_KEY.md for the separate future AI path.
 """
 
 import os
 import sqlite3
 import importlib
+import json
 from datetime import datetime, timezone
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -65,8 +65,33 @@ def ensure_ai_tables(conn):
             summary_text    TEXT,
             rationale_text  TEXT
         );
+
+        CREATE TABLE IF NOT EXISTS flywheel_briefs (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            config              TEXT    NOT NULL,
+            flywheel_group      TEXT    NOT NULL,
+            generated_at        TEXT    NOT NULL,
+            source_article_ids  TEXT    NOT NULL,
+            freshness_date      TEXT,
+            what_changed        TEXT    NOT NULL,
+            why_it_matters      TEXT    NOT NULL,
+            suggested_next_step TEXT    NOT NULL,
+            supporting_material TEXT    NOT NULL,
+            new_source_article_ids TEXT NOT NULL DEFAULT '[]',
+            review_status       TEXT    NOT NULL DEFAULT 'draft',
+            reviewed_at         TEXT
+        );
     """)
+    _ensure_column(conn, "flywheel_briefs", "new_source_article_ids", "TEXT NOT NULL DEFAULT '[]'")
+    _ensure_column(conn, "flywheel_briefs", "review_status", "TEXT NOT NULL DEFAULT 'draft'")
+    _ensure_column(conn, "flywheel_briefs", "reviewed_at", "TEXT")
     conn.commit()
+
+
+def _ensure_column(conn, table, column, definition):
+    columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+    if column not in columns:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
 def _valid_groups(config):
@@ -80,6 +105,23 @@ def _valid_groups(config):
         if g not in groups:
             groups.append(g)
     return groups
+
+
+def get_brief_groups(config):
+    """Return the configured flywheel groups with display metadata.
+
+    Config metadata is optional so the shared engine still works for the
+    other StoryLab contexts. Fan Atlas supplies durable labels and slugs.
+    """
+    try:
+        config_meta = importlib.import_module(f"configs.{config}")
+        definitions = getattr(config_meta, "FLYWHEEL_BRIEFS", {})
+    except ImportError:
+        definitions = {}
+    return [
+        {"name": group, **definitions.get(group, {})}
+        for group in _valid_groups(config)
+    ]
 
 
 def get_instructions(conn, config):
@@ -123,10 +165,34 @@ def get_latest_summary(conn, config, group):
     }
 
 
+def get_latest_flywheel_brief(conn, config, group):
+    """Return the newest source-only brief for a flywheel group, if any."""
+    ensure_ai_tables(conn)
+    row = conn.execute("""
+        SELECT id, generated_at, source_article_ids, freshness_date,
+               what_changed, why_it_matters, suggested_next_step,
+               supporting_material, new_source_article_ids, review_status,
+               reviewed_at
+        FROM flywheel_briefs
+        WHERE config = ? AND flywheel_group = ?
+        ORDER BY generated_at DESC, id DESC LIMIT 1
+    """, (config, group)).fetchone()
+    if not row:
+        return None
+    return {
+        "id": row[0], "generated_at": row[1],
+        "source_article_ids": json.loads(row[2]), "freshness_date": row[3],
+        "what_changed": row[4], "why_it_matters": row[5],
+        "suggested_next_step": row[6], "supporting_material": json.loads(row[7]),
+        "new_source_article_ids": json.loads(row[8] or "[]"),
+        "review_status": row[9] or "draft", "reviewed_at": row[10],
+    }
+
+
 def get_five_star_articles(conn, config, group):
     """All 5-star articles belonging to this flywheel group, regardless of
-    curation status -- the AI should see every strong signal, not just
-    ones you've already queued. Handles both legacy raw categories (via
+    curation status. Brief generation reviews every strong signal, not just
+    ones already queued. Handles both legacy raw categories (via
     CATEGORY_GROUPS) and new feeds tagged directly with the group name."""
     try:
         config_meta = importlib.import_module(f"configs.{config}")
@@ -139,16 +205,127 @@ def get_five_star_articles(conn, config, group):
 
     placeholders = ",".join("?" for _ in raw_categories)
     rows = conn.execute(f"""
-        SELECT id, title, source, url, summary, published_date, story_type
+        SELECT id, title, source, url, summary, published_date, fetched_date, story_type, category
         FROM articles
         WHERE config = ? AND relevance_score = 5 AND category IN ({placeholders})
         ORDER BY published_date DESC
     """, (config, *raw_categories)).fetchall()
     return [
         {"id": r[0], "title": r[1], "source": r[2], "url": r[3],
-         "summary": r[4], "published_date": r[5], "story_type": r[6]}
+         "summary": r[4], "published_date": r[5], "fetched_date": r[6],
+         "story_type": r[7], "category": r[8]}
         for r in rows
     ]
+
+
+def get_flywheel_brief(conn, config, group):
+    """Return the durable, fact-bounded brief workspace for one group.
+
+    A saved AI summary is optional. The source articles are always returned
+    so an operator can review the actual evidence before a summary exists.
+    """
+    groups = {item["name"]: item for item in get_brief_groups(config)}
+    if group not in groups:
+        return None
+    return {
+        "group": groups[group],
+        "instructions": get_instructions(conn, config).get(group, ""),
+        "generated_brief": get_latest_flywheel_brief(conn, config, group),
+        "articles": get_five_star_articles(conn, config, group),
+    }
+
+
+def _freshness_date(articles):
+    dates = [a.get("published_date") or a.get("fetched_date") for a in articles]
+    return max((value for value in dates if value), default=None)
+
+
+def generate_flywheel_brief(conn, config, group):
+    """Create and save a concise, source-only intelligence brief.
+
+    This intentionally makes no AI or network call. It reports what the
+    curated source set contains, preserves exact stored supporting material,
+    and frames a group-specific question instead of inventing a conclusion.
+    """
+    groups = {item["name"]: item for item in get_brief_groups(config)}
+    if group not in groups:
+        return {"ok": False, "error": "unknown_group", "message": "Unknown flywheel group."}
+    previous = get_latest_flywheel_brief(conn, config, group)
+    articles = get_five_star_articles(conn, config, group)
+    if not articles:
+        return {
+            "ok": False, "error": "no_articles",
+            "message": f"No five-star articles in {group} yet. Fetch and score sources before generating a brief.",
+        }
+
+    metadata = groups[group]
+    freshness = _freshness_date(articles)
+    source_ids = [article["id"] for article in articles]
+    previous_ids = set(previous["source_article_ids"]) if previous else set()
+    new_source_ids = [article_id for article_id in source_ids if article_id not in previous_ids]
+    supporting_material = [
+        {
+            "article_id": article["id"], "title": article["title"],
+            "source": article["source"], "url": article["url"],
+            "published_date": article["published_date"],
+            "exact_rss_summary": article["summary"] or "",
+        }
+        for article in articles
+    ]
+    latest = [article for article in articles if article["id"] in set(new_source_ids)][:5]
+    if not latest:
+        latest = articles[:5]
+    changed_lines = [
+        f"{article['title']} ({article['source']}, {(article['published_date'] or article['fetched_date'] or 'date unavailable')[:10]})"
+        for article in latest
+    ]
+    new_label = "all current sources on this first brief" if previous is None else f"{len(new_source_ids)} new since the last brief"
+    suffix = "" if len(articles) <= len(latest) else f" The evidence section retains all {len(articles)} current five-star sources."
+    what_changed = (
+        f"{len(articles)} five-star source{' is' if len(articles) == 1 else 's are'} currently in {group}; {new_label}. "
+        f"Most recent signals: " + "; ".join(changed_lines) + "." + suffix
+    )
+    why_it_matters = (
+        f"These sources were scored into the {group} flywheel group. "
+        f"{metadata.get('description', 'Review the source material before drawing a conclusion.')} "
+        "This is a review cue based on the curated source set, not a claim that the described practice will work for Fan Atlas."
+    )
+    suggested_next_step = metadata.get(
+        "suggested_question",
+        "Which source detail is concrete enough to validate before deciding whether to act?",
+    )
+    generated_at = datetime.now(timezone.utc).isoformat()
+    ensure_ai_tables(conn)
+    conn.execute("""
+        INSERT INTO flywheel_briefs
+          (config, flywheel_group, generated_at, source_article_ids, freshness_date,
+           what_changed, why_it_matters, suggested_next_step, supporting_material,
+           new_source_article_ids, review_status)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)
+    """, (
+        config, group, generated_at, json.dumps(source_ids), freshness,
+        what_changed, why_it_matters, suggested_next_step,
+        json.dumps(supporting_material), json.dumps(new_source_ids), "draft",
+    ))
+    conn.commit()
+    return {"ok": True, "brief": get_latest_flywheel_brief(conn, config, group)}
+
+
+def update_flywheel_brief_status(conn, config, brief_id, status):
+    """Apply the human review state to a saved brief."""
+    if status not in {"draft", "reviewed", "approved"}:
+        return {"ok": False, "message": "Status must be draft, reviewed, or approved."}
+    ensure_ai_tables(conn)
+    reviewed_at = datetime.now(timezone.utc).isoformat() if status != "draft" else None
+    cursor = conn.execute("""
+        UPDATE flywheel_briefs SET review_status = ?, reviewed_at = ?
+        WHERE id = ? AND config = ?
+    """, (status, reviewed_at, brief_id, config))
+    conn.commit()
+    if not cursor.rowcount:
+        return {"ok": False, "message": "Brief not found."}
+    row = conn.execute("SELECT flywheel_group FROM flywheel_briefs WHERE id = ?", (brief_id,)).fetchone()
+    return {"ok": True, "brief": get_latest_flywheel_brief(conn, config, row[0])}
 
 
 def build_source_capsules(articles):

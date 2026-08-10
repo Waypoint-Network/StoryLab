@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>StoryLab - Flywheel Brief</title>
+<style>
+  :root { --navy:#0D1B3E; --amber:#E8A020; --cream:#F8F6F1; --text:#1A1A2E; --muted:#667085; --line:#E4E7EC; --green:#176B3A; }
+  * { box-sizing:border-box; } body { margin:0; background:var(--cream); color:var(--text); font:14px/1.55 Inter,system-ui,sans-serif; }
+  header { background:var(--navy); color:#fff; padding:14px 28px; display:flex; justify-content:space-between; align-items:center; } .logo { font-size:18px; font-weight:800; letter-spacing:.03em; } .logo span { color:var(--amber); }
+  .nav { display:flex; gap:9px; } .nav a { color:#fff; text-decoration:none; border:1px solid rgba(255,255,255,.35); border-radius:18px; padding:5px 13px; font-size:12px; font-weight:700; }
+  main { max-width:920px; margin:0 auto; padding:38px 24px 64px; } .eyebrow { color:#9a6500; text-transform:uppercase; letter-spacing:.08em; font-weight:800; font-size:11px; }
+  h1 { font-size:34px; line-height:1.12; margin:7px 0 9px; } .lede { color:var(--muted); max-width:760px; font-size:16px; }
+  .summary, .workspace, .source { background:#fff; border:1px solid var(--line); border-radius:12px; } .summary { padding:22px; margin:28px 0 18px; } .summary h2, .workspace h2 { margin:0 0 8px; font-size:17px; } .brief-section { margin-top:20px; } .brief-section h3 { margin:0 0 6px; font-size:13px; text-transform:uppercase; letter-spacing:.05em; color:#4d5870; } .brief-section p { margin:0; white-space:pre-wrap; }
+  .source-heading { display:flex; justify-content:space-between; gap:20px; align-items:end; margin:32px 0 12px; } .source-heading h2 { margin:0; font-size:20px; } .count { color:var(--muted); font-size:12px; }
+  .workspace { padding:20px; margin:18px 0 30px; } textarea { width:100%; min-height:88px; resize:vertical; border:1px solid var(--line); border-radius:8px; padding:10px; font:inherit; } button { margin-top:8px; background:var(--amber); border:0; border-radius:7px; padding:7px 13px; color:var(--navy); font-weight:800; cursor:pointer; } .saved { margin-left:8px; color:var(--green); font-weight:700; font-size:12px; }
+  .source { padding:18px 20px; margin-bottom:12px; } .source h3 { margin:0 0 5px; font-size:16px; line-height:1.35; } .source h3 a { color:var(--navy); } .metadata { color:var(--muted); font-size:12px; margin-bottom:10px; } .article-summary { margin:0; white-space:pre-wrap; } .thin { margin-top:10px; color:#9a6500; font-size:12px; font-weight:700; }
+  .empty { padding:22px; background:#fff8e9; border-left:4px solid var(--amber); border-radius:4px; color:#6d5011; } .source-empty { color:var(--muted); } .snapshot { margin:9px 0 0; padding:12px; border-left:3px solid var(--amber); background:#fffaf0; border-radius:3px; } .snapshot a { color:var(--navy); font-weight:800; } .snapshot p { margin:5px 0 0; white-space:pre-wrap; } .review-bar { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:15px 0 0; padding-top:14px; border-top:1px solid var(--line); } .review-bar label { font-size:12px; color:var(--muted); font-weight:700; } .review-bar select { border:1px solid var(--line); border-radius:6px; padding:5px; background:#fff; } .new-note { margin-top:8px; color:var(--green); font-size:12px; font-weight:800; }
+  @media (max-width:680px) { header { padding:13px 18px; } main { padding:30px 18px; } h1 { font-size:28px; } .source-heading { display:block; } .count { display:block; margin-top:5px; } }
+</style>
+</head>
+<body>
+<header><div class="logo">STORY<span>LAB</span> - Flywheel Brief</div><nav class="nav"><a href="/briefs">All briefs</a><a href="/">Dashboard</a></nav></header>
+<main id="app" aria-live="polite"><p>Loading brief...</p></main>
+<script>
+const groupsBySlug = { 'institutional':'Institutional', 'mobilizer':'Mobilizer', 'product':'Product', 'fan-graph':'Fan Graph' };
+const escapeHtml = value => String(value || "").replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+const slug = location.pathname.split('/').filter(Boolean).pop();
+const group = groupsBySlug[slug];
+function formatDate(value) { if (!value) return 'Date unavailable'; const date = new Date(value); return isNaN(date) ? value.slice(0, 10) : date.toLocaleDateString(); }
+function snapshotSources(material) { return material.map(source => `<div class="snapshot"><a href="${escapeHtml(source.url)}" target="_blank" rel="noopener">${escapeHtml(source.title)}</a><div class="metadata">${escapeHtml(source.source)} &middot; ${formatDate(source.published_date)}</div><p>${escapeHtml(source.exact_rss_summary || 'No RSS summary was provided.')}</p></div>`).join(''); }
+function statusLabel(status) { return ({draft:'Draft', reviewed:'Reviewed', approved:'Approved'})[status] || 'Draft'; }
+function sources(articles) { if (!articles.length) return '<p class="source-empty">No five-star source articles are available for this group yet. Fetch and score sources, then return here.</p>'; return articles.map(article => {
+  const thin = !article.summary || article.summary.trim().split(/\s+/).length < 25;
+  return `<article class="source"><h3><a href="${escapeHtml(article.url)}" target="_blank" rel="noopener">${escapeHtml(article.title)}</a></h3><div class="metadata">${escapeHtml(article.source)} &middot; ${formatDate(article.published_date)} &middot; ${escapeHtml(article.story_type || 'Unclassified')}</div><p class="article-summary">${escapeHtml(article.summary || 'No RSS summary was provided.')}</p>${thin ? '<div class="thin">Thin source summary - use the article itself before drawing conclusions.</div>' : ''}</article>`;
+}).join(''); }
+async function load() {
+  const app = document.getElementById('app');
+  if (!group) { app.innerHTML = '<div class="empty">This flywheel brief does not exist. <a href="/briefs">Return to all briefs.</a></div>'; return; }
+  const response = await fetch('/api/flywheel-brief?group=' + encodeURIComponent(group));
+  const data = await response.json();
+  if (!response.ok) { app.innerHTML = '<div class="empty">Could not load this brief. <a href="/briefs">Return to all briefs.</a></div>'; return; }
+  const brief = data.brief, meta = brief.group, generated = brief.generated_brief;
+  const newCount = generated ? generated.new_source_article_ids.length : 0;
+  const generatedHtml = generated ? `<div class="summary"><div class="eyebrow">Generated ${formatDate(generated.generated_at)} &middot; Fresh through ${formatDate(generated.freshness_date)}</div><h2>Current intelligence brief</h2><div class="new-note">${newCount} new source${newCount === 1 ? '' : 's'} since the previous brief</div><div class="brief-section"><h3>What changed</h3><p>${escapeHtml(generated.what_changed)}</p></div><div class="brief-section"><h3>Why it matters to this flywheel</h3><p>${escapeHtml(generated.why_it_matters)}</p></div><div class="brief-section"><h3>Suggested question, decision, or experiment</h3><p>${escapeHtml(generated.suggested_next_step)}</p></div><div class="brief-section"><h3>Exact supporting material</h3>${snapshotSources(generated.supporting_material)}</div><div class="review-bar"><label for="review-status">Review status</label><select id="review-status"><option value="draft" ${generated.review_status === 'draft' ? 'selected' : ''}>Draft</option><option value="reviewed" ${generated.review_status === 'reviewed' ? 'selected' : ''}>Reviewed</option><option value="approved" ${generated.review_status === 'approved' ? 'selected' : ''}>Approved</option></select><button id="save-status">Save status</button><span class="saved" id="review-status-message">${statusLabel(generated.review_status)}${generated.reviewed_at ? ' ' + formatDate(generated.reviewed_at) : ''}</span></div></div>` : '<div class="empty"><strong>No generated intelligence brief yet.</strong> Generate a source-only brief from the current five-star articles. It will not make claims beyond the stored source material.</div>';
+  app.innerHTML = `<div class="eyebrow">${escapeHtml(meta.eyebrow || 'Flywheel intelligence')}</div><h1>${escapeHtml(meta.name)}</h1><p class="lede">${escapeHtml(meta.description || '')}</p>${generatedHtml}<section class="workspace"><h2>Brief controls</h2><p class="metadata">Generation uses only the current five-star articles and saves a dated source snapshot. It does not call AI or change article scores.</p><button id="generate">Generate brief from current sources</button><span class="saved" id="generated-status"></span><div class="brief-section"><h3>What this brief should watch for</h3><textarea id="instructions" placeholder="Name the signals, examples, or questions this group should prioritize.">${escapeHtml(brief.instructions || '')}</textarea><br><button id="save">Save brief guidance</button><span class="saved" id="saved"></span></div></section><div class="source-heading"><div><div class="eyebrow">Current evidence</div><h2>Five-star source articles</h2></div><span class="count">${brief.articles.length} currently available</span></div><section>${sources(brief.articles)}</section>`;
+  document.getElementById('save').addEventListener('click', async () => {
+    const button = document.getElementById('save'), status = document.getElementById('saved'); button.disabled = true;
+    const saveResponse = await fetch('/api/ai-instructions', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({flywheel_group:group, text:document.getElementById('instructions').value}) });
+    button.disabled = false; status.textContent = saveResponse.ok ? 'Saved' : 'Could not save';
+  });
+  document.getElementById('generate').addEventListener('click', async () => {
+    const button = document.getElementById('generate'), status = document.getElementById('generated-status'); button.disabled = true; status.textContent = 'Generating...';
+    const generatedResponse = await fetch('/api/generate-flywheel-brief', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({flywheel_group:group}) });
+    const generatedData = await generatedResponse.json();
+    if (generatedResponse.ok && generatedData.ok) { status.textContent = 'Generated'; setTimeout(load, 250); }
+    else { button.disabled = false; status.textContent = generatedData.message || 'Could not generate'; }
+  });
+  if (generated) document.getElementById('save-status').addEventListener('click', async () => {
+    const button = document.getElementById('save-status'), message = document.getElementById('review-status-message'); button.disabled = true;
+    const response = await fetch('/api/flywheel-brief-status', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({brief_id:generated.id, status:document.getElementById('review-status').value}) });
+    const result = await response.json(); button.disabled = false;
+    if (response.ok && result.ok) { message.textContent = 'Saved'; setTimeout(load, 250); } else message.textContent = result.message || 'Could not save';
+  });
+}
+load();
+</script>
+</body>
+</html>

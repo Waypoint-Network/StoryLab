@@ -38,6 +38,9 @@ HTML_PATH      = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dashb
 CRITERIA_PATH  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "criteria.html")
 FEEDS_PATH     = os.path.join(os.path.dirname(os.path.abspath(__file__)), "feeds.html")
 SUMMARIES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "summaries.html")
+BRIEF_PATH     = os.path.join(os.path.dirname(os.path.abspath(__file__)), "brief.html")
+SIGNALS_PATH   = os.path.join(os.path.dirname(os.path.abspath(__file__)), "signals.html")
+FEED_HEALTH_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "feed_health.html")
 
 _config = "travel_tech_ux"
 
@@ -94,8 +97,20 @@ class Handler(BaseHTTPRequestHandler):
             self.send_html(FEEDS_PATH)
             return
 
-        if path == "/summaries":
+        if path == "/feed-health":
+            self.send_html(FEED_HEALTH_PATH)
+            return
+
+        if path == "/signals":
+            self.send_html(SIGNALS_PATH)
+            return
+
+        if path in ("/summaries", "/briefs"):
             self.send_html(SUMMARIES_PATH)
+            return
+
+        if path.startswith("/briefs/"):
+            self.send_html(BRIEF_PATH)
             return
 
         if path == "/api/articles":
@@ -240,6 +255,83 @@ class Handler(BaseHTTPRequestHandler):
             summary = get_latest_summary(conn, _config, group)
             conn.close()
             self.send_json({"summary": summary})
+            return
+
+        if path == "/api/feed-health":
+            from core.aggregator import seed_feeds_if_empty
+            conn = get_conn()
+            seed_feeds_if_empty(conn, _config)
+            feeds = conn.execute("""
+                SELECT id, label, url, category FROM feeds
+                WHERE config = ? ORDER BY category, label
+            """, (_config,)).fetchall()
+            health = []
+            for feed in feeds:
+                log = conn.execute("""
+                    SELECT run_at, items_added, error FROM fetch_log
+                    WHERE config = ? AND source = ? ORDER BY run_at DESC, id DESC LIMIT 1
+                """, (_config, feed["label"])).fetchone()
+                if log is None:
+                    state = "never_checked"
+                elif log["error"]:
+                    state = "failing"
+                else:
+                    state = "healthy"
+                health.append({**dict(feed), "state": state,
+                               "last_checked": log["run_at"] if log else None,
+                               "items_added": log["items_added"] if log else None,
+                               "error": log["error"] if log else None})
+            conn.close()
+            self.send_json({"feeds": health})
+            return
+
+        if path == "/api/signal-directory":
+            conn = get_conn()
+            ensure_article_tags_table(conn)
+            rows = conn.execute("""
+                SELECT id, source, category, title, url, summary, published_date,
+                       relevance_score, story_type
+                FROM articles WHERE config = ?
+                ORDER BY relevance_score DESC, published_date DESC LIMIT 500
+            """, (_config,)).fetchall()
+            tags = conn.execute("""
+                SELECT article_tags.id, article_tags.article_id, article_tags.tag
+                FROM article_tags JOIN articles ON articles.id = article_tags.article_id
+                WHERE articles.config = ? ORDER BY article_tags.tag COLLATE NOCASE
+            """, (_config,)).fetchall()
+            conn.close()
+            self.send_json({"articles": [dict(row) for row in rows],
+                            "tags": [dict(row) for row in tags]})
+            return
+
+        if path == "/api/flywheel-briefs":
+            from core.ai_summary import get_brief_groups, get_latest_flywheel_brief, get_five_star_articles
+            conn = get_conn()
+            briefs = []
+            for group in get_brief_groups(_config):
+                name = group["name"]
+                briefs.append({
+                    **group,
+                    "article_count": len(get_five_star_articles(conn, _config, name)),
+                    "generated_brief": get_latest_flywheel_brief(conn, _config, name),
+                })
+            conn.close()
+            self.send_json({"briefs": briefs})
+            return
+
+        if path == "/api/flywheel-brief":
+            from core.ai_summary import get_flywheel_brief
+            group = params.get("group", [""])[0]
+            if not group:
+                self.send_json({"error": "group required"}, 400)
+                return
+            conn = get_conn()
+            brief = get_flywheel_brief(conn, _config, group)
+            conn.close()
+            if brief is None:
+                self.send_json({"error": "unknown flywheel group"}, 404)
+                return
+            self.send_json({"brief": brief})
             return
 
         if path == "/api/export":
@@ -428,6 +520,60 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(result)
             return
 
+        if parsed.path == "/api/generate-flywheel-brief":
+            group = (body.get("flywheel_group") or "").strip()
+            if not group:
+                self.send_json({"error": "flywheel_group required"}, 400)
+                return
+            from core.ai_summary import generate_flywheel_brief
+            conn = get_conn()
+            result = generate_flywheel_brief(conn, _config, group)
+            conn.close()
+            self.send_json(result, 200 if result.get("ok") else 400)
+            return
+
+        if parsed.path == "/api/flywheel-brief-status":
+            brief_id = body.get("brief_id")
+            status = (body.get("status") or "").strip()
+            if not brief_id or not status:
+                self.send_json({"error": "brief_id and status required"}, 400)
+                return
+            from core.ai_summary import update_flywheel_brief_status
+            conn = get_conn()
+            result = update_flywheel_brief_status(conn, _config, brief_id, status)
+            conn.close()
+            self.send_json(result, 200 if result.get("ok") else 400)
+            return
+
+        if parsed.path == "/api/article-tags":
+            article_id = body.get("article_id")
+            tag = (body.get("tag") or "").strip()
+            if not article_id or not tag or len(tag) > 100:
+                self.send_json({"error": "article_id and a tag of 100 characters or fewer are required"}, 400)
+                return
+            conn = get_conn()
+            ensure_article_tags_table(conn)
+            article = conn.execute("SELECT id FROM articles WHERE id = ? AND config = ?", (article_id, _config)).fetchone()
+            if not article:
+                conn.close(); self.send_json({"error": "article not found"}, 404); return
+            conn.execute("INSERT OR IGNORE INTO article_tags (article_id, tag) VALUES (?,?)", (article_id, tag))
+            conn.commit(); conn.close()
+            self.send_json({"ok": True})
+            return
+
+        if parsed.path == "/api/article-tags/delete":
+            tag_id = body.get("id")
+            if not tag_id:
+                self.send_json({"error": "id required"}, 400)
+                return
+            conn = get_conn()
+            ensure_article_tags_table(conn)
+            conn.execute("""DELETE FROM article_tags WHERE id = ? AND article_id IN
+                         (SELECT id FROM articles WHERE config = ?)""", (tag_id, _config))
+            conn.commit(); conn.close()
+            self.send_json({"ok": True})
+            return
+
         if parsed.path == "/api/rescore":
             from core.scorer import score_article
             conn = get_conn()
@@ -448,6 +594,18 @@ class Handler(BaseHTTPRequestHandler):
 
         self.send_response(404)
         self.end_headers()
+
+
+def ensure_article_tags_table(conn):
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS article_tags (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            article_id INTEGER NOT NULL,
+            tag TEXT NOT NULL,
+            UNIQUE(article_id, tag)
+        )
+    """)
+    conn.commit()
 
 
 def main():
