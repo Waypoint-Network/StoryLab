@@ -41,6 +41,7 @@ SUMMARIES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "summa
 BRIEF_PATH     = os.path.join(os.path.dirname(os.path.abspath(__file__)), "brief.html")
 SIGNALS_PATH   = os.path.join(os.path.dirname(os.path.abspath(__file__)), "signals.html")
 FEED_HEALTH_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "feed_health.html")
+HELM_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "helm.html")
 
 _config = "travel_tech_ux"
 
@@ -103,6 +104,10 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/signals":
             self.send_html(SIGNALS_PATH)
+            return
+
+        if path == "/helm":
+            self.send_html(HELM_PATH)
             return
 
         if path in ("/summaries", "/briefs"):
@@ -332,6 +337,18 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"error": "unknown flywheel group"}, 404)
                 return
             self.send_json({"brief": brief})
+            return
+
+        if path == "/api/helm-signals":
+            from core.helm import list_article_candidates, list_signals
+            conn = get_conn()
+            self.send_json({"candidates": list_article_candidates(conn, _config), "signals": list_signals(conn, _config)})
+            conn.close()
+            return
+
+        if path == "/api/helm-connection-diagnostics":
+            from core.helm import connection_diagnostics
+            self.send_json(connection_diagnostics())
             return
 
         if path == "/api/export":
@@ -592,6 +609,51 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"ok": True, "rescored": len(rows), "changed": changed})
             return
 
+        if parsed.path == "/api/helm-signals":
+            from core.helm import create_signal_from_article
+            conn = get_conn()
+            result = create_signal_from_article(conn, _config, body.get("article_id"))
+            conn.close()
+            self.send_json(result, 200 if result.get("ok") else 400)
+            return
+
+        if parsed.path == "/api/helm-brief":
+            from core.helm import prepare_signals_from_approved_brief
+            conn = get_conn()
+            result = prepare_signals_from_approved_brief(conn, _config, body.get("brief_id"))
+            conn.close()
+            self.send_json(result, 200 if result.get("ok") else 400)
+            return
+
+        if parsed.path == "/api/publish-helm-brief":
+            from core.helm import publish_approved_brief
+            conn = get_conn()
+            result = publish_approved_brief(conn, _config, body.get("brief_id"))
+            conn.close()
+            self.send_json(result, 200 if result.get("ok") else 400)
+            return
+
+        if parsed.path.startswith("/api/helm-signals/"):
+            try:
+                signal_id = int(parsed.path.rsplit("/", 1)[1])
+            except ValueError:
+                self.send_json({"error": "invalid signal id"}, 400)
+                return
+            from core.helm import save_signal
+            conn = get_conn()
+            result = save_signal(conn, _config, signal_id, body)
+            conn.close()
+            self.send_json(result, 200 if result.get("ok") else 400)
+            return
+
+        if parsed.path == "/api/helm-publish":
+            from core.helm import publish_signals
+            conn = get_conn()
+            result = publish_signals(conn, _config, body.get("signal_ids", []))
+            conn.close()
+            self.send_json(result, 200 if result.get("ok") else 400)
+            return
+
         self.send_response(404)
         self.end_headers()
 
@@ -633,6 +695,8 @@ def main():
     seed_scoring_criteria_if_empty(seed_conn, _config)
     seed_feeds_if_empty(seed_conn, _config)
     ensure_ai_tables(seed_conn)
+    from core.helm import ensure_helm_tables
+    ensure_helm_tables(seed_conn)
     ensure_schedule_table(seed_conn)
     seed_conn.close()
 

@@ -21,6 +21,8 @@ import importlib
 import json
 from datetime import datetime, timezone
 
+BRIEF_ARTICLE_MAX_AGE_DAYS = 90
+
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ENV_PATH = os.path.join(REPO_ROOT, ".env")
 
@@ -42,7 +44,7 @@ def load_dotenv(path=ENV_PATH):
 
 def has_api_key():
     load_dotenv()
-    return bool(os.environ.get("ANTHROPIC_API_KEY"))
+    return bool(os.environ.get("OPENAI_API_KEY"))
 
 
 def ensure_ai_tables(conn):
@@ -79,12 +81,22 @@ def ensure_ai_tables(conn):
             supporting_material TEXT    NOT NULL,
             new_source_article_ids TEXT NOT NULL DEFAULT '[]',
             review_status       TEXT    NOT NULL DEFAULT 'draft',
-            reviewed_at         TEXT
+            reviewed_at         TEXT,
+            helm_publish_status TEXT    NOT NULL DEFAULT 'not_published',
+            helm_published_at   TEXT,
+            helm_last_attempt_at TEXT,
+            helm_last_error     TEXT,
+            helm_payload_version INTEGER NOT NULL DEFAULT 1
         );
     """)
     _ensure_column(conn, "flywheel_briefs", "new_source_article_ids", "TEXT NOT NULL DEFAULT '[]'")
     _ensure_column(conn, "flywheel_briefs", "review_status", "TEXT NOT NULL DEFAULT 'draft'")
     _ensure_column(conn, "flywheel_briefs", "reviewed_at", "TEXT")
+    _ensure_column(conn, "flywheel_briefs", "helm_publish_status", "TEXT NOT NULL DEFAULT 'not_published'")
+    _ensure_column(conn, "flywheel_briefs", "helm_published_at", "TEXT")
+    _ensure_column(conn, "flywheel_briefs", "helm_last_attempt_at", "TEXT")
+    _ensure_column(conn, "flywheel_briefs", "helm_last_error", "TEXT")
+    _ensure_column(conn, "flywheel_briefs", "helm_payload_version", "INTEGER NOT NULL DEFAULT 1")
     conn.commit()
 
 
@@ -172,7 +184,8 @@ def get_latest_flywheel_brief(conn, config, group):
         SELECT id, generated_at, source_article_ids, freshness_date,
                what_changed, why_it_matters, suggested_next_step,
                supporting_material, new_source_article_ids, review_status,
-               reviewed_at
+               reviewed_at, helm_publish_status, helm_published_at,
+               helm_last_attempt_at, helm_last_error, helm_payload_version
         FROM flywheel_briefs
         WHERE config = ? AND flywheel_group = ?
         ORDER BY generated_at DESC, id DESC LIMIT 1
@@ -186,6 +199,9 @@ def get_latest_flywheel_brief(conn, config, group):
         "suggested_next_step": row[6], "supporting_material": json.loads(row[7]),
         "new_source_article_ids": json.loads(row[8] or "[]"),
         "review_status": row[9] or "draft", "reviewed_at": row[10],
+        "helm_publish_status": row[11] or "not_published", "helm_published_at": row[12],
+        "helm_last_attempt_at": row[13], "helm_last_error": row[14],
+        "helm_payload_version": row[15] or 1,
     }
 
 
@@ -210,12 +226,42 @@ def get_five_star_articles(conn, config, group):
         WHERE config = ? AND relevance_score = 5 AND category IN ({placeholders})
         ORDER BY published_date DESC
     """, (config, *raw_categories)).fetchall()
-    return [
+    all_articles = [
         {"id": r[0], "title": r[1], "source": r[2], "url": r[3],
          "summary": r[4], "published_date": r[5], "fetched_date": r[6],
          "story_type": r[7], "category": r[8]}
         for r in rows
     ]
+    cutoff = datetime.now(timezone.utc).timestamp() - (BRIEF_ARTICLE_MAX_AGE_DAYS * 86400)
+    def is_current(article):
+        value = article.get("published_date") or article.get("fetched_date")
+        if not value:
+            return False
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp() >= cutoff
+        except ValueError:
+            return False
+    return [article for article in all_articles if is_current(article)]
+
+
+def get_previously_briefed_article_ids(conn, config, group):
+    """Every source already included in a prior brief for this flywheel.
+
+    Comparison is intentionally against full history rather than only the last
+    brief, so a persistent five-star source cannot recur in every daily brief.
+    """
+    ensure_ai_tables(conn)
+    ids = set()
+    rows = conn.execute("""
+        SELECT source_article_ids FROM flywheel_briefs
+        WHERE config = ? AND flywheel_group = ?
+    """, (config, group)).fetchall()
+    for row in rows:
+        try:
+            ids.update(json.loads(row[0] or "[]"))
+        except (TypeError, json.JSONDecodeError):
+            continue
+    return ids
 
 
 def get_flywheel_brief(conn, config, group):
@@ -251,18 +297,25 @@ def generate_flywheel_brief(conn, config, group):
     if group not in groups:
         return {"ok": False, "error": "unknown_group", "message": "Unknown flywheel group."}
     previous = get_latest_flywheel_brief(conn, config, group)
-    articles = get_five_star_articles(conn, config, group)
-    if not articles:
+    current_articles = get_five_star_articles(conn, config, group)
+    if not current_articles:
         return {
             "ok": False, "error": "no_articles",
-            "message": f"No five-star articles in {group} yet. Fetch and score sources before generating a brief.",
+            "message": f"No current five-star articles in {group} from the last {BRIEF_ARTICLE_MAX_AGE_DAYS} days.",
+        }
+
+    previously_briefed_ids = get_previously_briefed_article_ids(conn, config, group)
+    articles = [article for article in current_articles if article["id"] not in previously_briefed_ids]
+    if not articles:
+        return {
+            "ok": False, "error": "no_new_articles",
+            "message": f"No new five-star material in {group} since the last brief. No summary was generated.",
         }
 
     metadata = groups[group]
     freshness = _freshness_date(articles)
     source_ids = [article["id"] for article in articles]
-    previous_ids = set(previous["source_article_ids"]) if previous else set()
-    new_source_ids = [article_id for article_id in source_ids if article_id not in previous_ids]
+    new_source_ids = source_ids[:]
     supporting_material = [
         {
             "article_id": article["id"], "title": article["title"],
@@ -272,15 +325,13 @@ def generate_flywheel_brief(conn, config, group):
         }
         for article in articles
     ]
-    latest = [article for article in articles if article["id"] in set(new_source_ids)][:5]
-    if not latest:
-        latest = articles[:5]
+    latest = articles[:5]
     changed_lines = [
         f"{article['title']} ({article['source']}, {(article['published_date'] or article['fetched_date'] or 'date unavailable')[:10]})"
         for article in latest
     ]
-    new_label = "all current sources on this first brief" if previous is None else f"{len(new_source_ids)} new since the last brief"
-    suffix = "" if len(articles) <= len(latest) else f" The evidence section retains all {len(articles)} current five-star sources."
+    new_label = "all current sources on this first brief" if previous is None else f"{len(new_source_ids)} new since the previous brief"
+    suffix = "" if len(articles) <= len(latest) else f" The evidence section retains all {len(articles)} new five-star sources."
     what_changed = (
         f"{len(articles)} five-star source{' is' if len(articles) == 1 else 's are'} currently in {group}; {new_label}. "
         f"Most recent signals: " + "; ".join(changed_lines) + "." + suffix
@@ -376,7 +427,7 @@ def generate_summary(conn, config, group):
     source_capsules = build_source_capsules(articles)  # noqa: F841 -- ready for the real call below
 
     # TODO (added when the API key is wired up): send `instructions` +
-    # `source_capsules` to the Anthropic API via urllib.request (stdlib,
+    # `source_capsules` to the OpenAI API via urllib.request (stdlib,
     # same as the RSS fetcher), parse the response into summary_text /
     # rationale_text, INSERT a row into ai_summaries, and return
     # {"ok": True, "summary": {...same shape as get_latest_summary()...}}

@@ -1,59 +1,35 @@
-# Adding the AI API key — StoryLab AI Summaries
+# OpenAI API key — StoryLab AI Summaries
 
-This is the one thing left to turn the AI Summaries panel (`/summaries`)
-from example content into real, generated output. Everything else —
-the standing instructions box, the 5-star article gathering, the
-fact-bounded source formatting, the database storage — is already built
-and working. This document is the whole remaining step.
+Strategy Lab's Helm publishing workflow does not use an AI API key. It sends
+operator-approved, source-backed signals directly to The Helm.
 
-## Which provider
-
-**Anthropic (Claude).** The rest of StoryLab is already built around
-Claude's voice and its FACT BOUNDARY / no-fabrication rules (see the
-existing ✍ Story Brief panel), so this feature follows the same
-provider rather than introducing a second one.
+`OPENAI_API_KEY` is reserved only for the separate AI Summaries feature. That
+feature is not connected to OpenAI yet, so adding a key now does not make any
+call, create any charge, or change the source-only brief workflow.
 
 ## Where the key goes
 
-1. Get a key from [console.anthropic.com](https://console.anthropic.com)
-   (Account → API Keys).
-2. In the repo root (same folder as this file), copy `.env.example` to
-   a new file named exactly `.env`.
-3. Open `.env` and replace the placeholder:
+1. In the repository root, create a file named `.env` if it does not already
+   exist.
+2. Add this line, replacing the value with your private API key:
+
+   ```env
+   OPENAI_API_KEY=
    ```
-   ANTHROPIC_API_KEY=sk-ant-...your real key...
+
+3. Keep the Helm settings in the same file when their real values are ready:
+
+   ```env
+   HELM_STRATEGY_ENDPOINT=
+   HELM_STRATEGY_API_KEY=
    ```
-4. Restart the dashboard server (`python core/server.py --config
-   fan_atlas_insiders`). It reads `.env` automatically on startup —
-   nothing else to configure, no environment variables to set by hand
-   in PowerShell.
 
-**This file will never be pushed to GitHub.** `.env` is listed in
-`.gitignore` (confirmed, not just assumed) — `git status` will never show
-it as a change to commit, and `git add -A` won't pick it up. Only
-`.env.example` (the placeholder template, no real key in it) is tracked.
+`.env` is ignored by Git, so do not put the key in `.env.example`, source
+code, or a chat message.
 
-## What actually changes when the key is added
+## What happens next
 
-Right now, `core/ai_summary.py`'s `generate_summary()` function checks
-for the key first. With no key, it returns the "No API key configured
-yet" message you see in the dashboard. With a key present but nothing
-else changed, it goes one step further — it gathers that category's
-5-star articles and builds them into the same fact-bounded source
-format the Story Brief panel already uses — then stops at a clearly
-marked `TODO` and tells you how many articles it found.
-
-The one remaining piece is writing the actual outbound call to Anthropic
-inside that `TODO` — a small, self-contained addition (roughly 30-50
-lines): send the instructions + source articles, get a response back,
-save it, done. I deliberately didn't write and leave that code dormant
-now, since it's real external-service code with real cost — better to
-write and test it for real once the key exists. When you're ready, just
-say so and I'll wire it in; nothing else in the app needs to change.
-
-## Cost, once it's wired up
-
-Each press of "Generate Summaries" will make one real, billed API call
-— small (fractions of a cent to a few cents depending on how many
-5-star articles are in that category), but real, and **only** when you
-press the button. Nothing runs automatically or on a schedule.
+When we intentionally wire the AI Summaries feature to OpenAI, it will use
+this local key only when an operator explicitly asks it to generate a summary.
+Until then, Strategy Lab remains source-backed and local, and Helm publishing
+uses only its own endpoint and key.
