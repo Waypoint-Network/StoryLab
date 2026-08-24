@@ -253,11 +253,12 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/ai-summary":
             from core.ai_summary import get_latest_summary
             group = params.get("group", [""])[0]
+            cadence = params.get("cadence", ["daily"])[0]
             if not group:
                 self.send_json({"error": "group required"}, 400)
                 return
             conn = get_conn()
-            summary = get_latest_summary(conn, _config, group)
+            summary = get_latest_summary(conn, _config, group, cadence)
             conn.close()
             self.send_json({"summary": summary})
             return
@@ -527,14 +528,15 @@ class Handler(BaseHTTPRequestHandler):
 
         if parsed.path == "/api/generate-summary":
             group = (body.get("flywheel_group") or "").strip()
+            cadence = (body.get("cadence") or "daily").strip()
             if not group:
                 self.send_json({"error": "flywheel_group required"}, 400)
                 return
             from core.ai_summary import generate_summary
             conn = get_conn()
-            result = generate_summary(conn, _config, group)
+            result = generate_summary(conn, _config, group, cadence)
             conn.close()
-            self.send_json(result)
+            self.send_json(result, 200 if result.get("ok") else 400)
             return
 
         if parsed.path == "/api/generate-flywheel-brief":

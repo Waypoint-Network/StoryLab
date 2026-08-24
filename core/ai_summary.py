@@ -20,8 +20,13 @@ import sqlite3
 import importlib
 import json
 from datetime import datetime, timezone
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 BRIEF_ARTICLE_MAX_AGE_DAYS = 90
+SUMMARY_CADENCES = {"daily", "weekly"}
+OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
+OPENAI_SUMMARY_MODEL = "gpt-5-mini"
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ENV_PATH = os.path.join(REPO_ROOT, ".env")
@@ -97,6 +102,10 @@ def ensure_ai_tables(conn):
     _ensure_column(conn, "flywheel_briefs", "helm_last_attempt_at", "TEXT")
     _ensure_column(conn, "flywheel_briefs", "helm_last_error", "TEXT")
     _ensure_column(conn, "flywheel_briefs", "helm_payload_version", "INTEGER NOT NULL DEFAULT 1")
+    _ensure_column(conn, "ai_summaries", "cadence", "TEXT NOT NULL DEFAULT 'daily'")
+    _ensure_column(conn, "ai_summaries", "window_start", "TEXT")
+    _ensure_column(conn, "ai_summaries", "window_end", "TEXT")
+    _ensure_column(conn, "ai_summaries", "model", "TEXT")
     conn.commit()
 
 
@@ -160,21 +169,62 @@ def save_instructions(conn, config, group, text):
     conn.commit()
 
 
-def get_latest_summary(conn, config, group):
+def get_latest_summary(conn, config, group, cadence="daily"):
     """Most recent real (never mock) generation for this group, or None."""
     ensure_ai_tables(conn)
     row = conn.execute("""
         SELECT id, generated_at, article_ids, summary_text, rationale_text
         FROM ai_summaries
-        WHERE config = ? AND flywheel_group = ?
+        WHERE config = ? AND flywheel_group = ? AND cadence = ?
         ORDER BY generated_at DESC LIMIT 1
-    """, (config, group)).fetchone()
+    """, (config, group, cadence)).fetchone()
     if not row:
         return None
     return {
-        "id": row[0], "generated_at": row[1], "article_ids": row[2],
-        "summary_text": row[3], "rationale_text": row[4],
+        "id": row[0], "generated_at": row[1], "article_ids": json.loads(row[2] or "[]"),
+        "summary_text": row[3], "rationale_text": row[4], "cadence": cadence,
     }
+
+
+def get_summary_sources(conn, article_ids):
+    """Return the durable source links for one saved AI summary in ID order."""
+    if not article_ids:
+        return []
+    placeholders = ",".join("?" for _ in article_ids)
+    rows = conn.execute(f"""
+        SELECT id, title, source, url FROM articles WHERE id IN ({placeholders})
+    """, article_ids).fetchall()
+    by_id = {row[0]: {"id": row[0], "title": row[1], "source": row[2], "url": row[3]} for row in rows}
+    return [by_id[article_id] for article_id in article_ids if article_id in by_id]
+
+
+def get_summarized_article_ids(conn, config, group, cadence):
+    """Source IDs already used by this group and cadence.
+
+    Daily and weekly histories are intentionally independent. A weekly review
+    can synthesize the whole week's new evidence even when each item was
+    already included in a daily update.
+    """
+    ensure_ai_tables(conn)
+    ids = set()
+    rows = conn.execute("""
+        SELECT article_ids FROM ai_summaries
+        WHERE config = ? AND flywheel_group = ? AND cadence = ?
+    """, (config, group, cadence)).fetchall()
+    for row in rows:
+        try:
+            ids.update(json.loads(row[0] or "[]"))
+        except (TypeError, json.JSONDecodeError):
+            continue
+    return ids
+
+
+def get_new_summary_articles(conn, config, group, cadence):
+    if cadence not in SUMMARY_CADENCES:
+        return []
+    summarized = get_summarized_article_ids(conn, config, group, cadence)
+    return [article for article in get_five_star_articles(conn, config, group)
+            if article["id"] not in summarized]
 
 
 def get_latest_flywheel_brief(conn, config, group):
@@ -273,11 +323,21 @@ def get_flywheel_brief(conn, config, group):
     groups = {item["name"]: item for item in get_brief_groups(config)}
     if group not in groups:
         return None
+    ai_summaries = {}
+    for cadence in ("daily", "weekly"):
+        latest = get_latest_summary(conn, config, group, cadence)
+        if latest:
+            latest["sources"] = get_summary_sources(conn, latest["article_ids"])
+        ai_summaries[cadence] = {
+            "latest": latest,
+            "new_article_count": len(get_new_summary_articles(conn, config, group, cadence)),
+        }
     return {
         "group": groups[group],
         "instructions": get_instructions(conn, config).get(group, ""),
         "generated_brief": get_latest_flywheel_brief(conn, config, group),
         "articles": get_five_star_articles(conn, config, group),
+        "ai_summaries": ai_summaries,
     }
 
 
@@ -402,12 +462,50 @@ def build_source_capsules(articles):
     return "\n---\n".join(blocks)
 
 
-def generate_summary(conn, config, group):
-    """Entry point the 'Generate Summaries' button calls. Returns a dict
-    the frontend can render directly. The only unbuilt piece is the actual
-    outbound API call -- everything up to that point (gathering this
-    category's 5-star articles, building fact-bounded source capsules) is
-    real and runs today."""
+def _summary_schema():
+    return {
+        "type": "json_schema",
+        "name": "storylab_source_summary",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "properties": {
+                "summary_text": {"type": "string"},
+                "rationale_text": {"type": "string"},
+            },
+            "required": ["summary_text", "rationale_text"],
+            "additionalProperties": False,
+        },
+    }
+
+
+def _response_output_text(response_body):
+    if response_body.get("status") and response_body.get("status") != "completed":
+        error = response_body.get("error") or {}
+        incomplete = response_body.get("incomplete_details") or {}
+        detail = error.get("message") or incomplete.get("reason") or response_body.get("status")
+        raise ValueError(f"OpenAI did not complete the summary: {detail}")
+    if response_body.get("output_text"):
+        return response_body["output_text"]
+    for item in response_body.get("output", []):
+        for content in item.get("content", []):
+            if content.get("type") == "output_text" and content.get("text"):
+                return content["text"]
+            if content.get("type") == "refusal" and content.get("refusal"):
+                raise ValueError(f"OpenAI declined the summary: {content['refusal']}")
+    raise ValueError("OpenAI returned no text output.")
+
+
+def generate_summary(conn, config, group, cadence="daily", opener=urlopen):
+    """Generate one manual, source-bounded daily or weekly update.
+
+    Each cadence tracks its own used article IDs. This makes daily updates a
+    change log while preserving a full weekly synthesis of that week's source
+    material. The OpenAI response itself is not retained by OpenAI (store is
+    false); StoryLab stores only the reviewed text and its local source IDs.
+    """
+    if cadence not in SUMMARY_CADENCES:
+        return {"ok": False, "error": "invalid_cadence", "message": "Cadence must be daily or weekly."}
     if not has_api_key():
         return {
             "ok": False,
@@ -415,28 +513,74 @@ def generate_summary(conn, config, group):
             "message": "No API key configured yet. See ADD_API_KEY.md for how to add one.",
         }
 
-    articles = get_five_star_articles(conn, config, group)
+    articles = get_new_summary_articles(conn, config, group, cadence)
     if not articles:
         return {
             "ok": False,
-            "error": "no_articles",
-            "message": f"No 5-star articles in {group} yet — nothing to summarize.",
+            "error": "no_new_articles",
+            "message": f"No new five-star articles for this {cadence} summary in {group}.",
         }
 
     instructions = get_instructions(conn, config).get(group, "")
-    source_capsules = build_source_capsules(articles)  # noqa: F841 -- ready for the real call below
+    source_capsules = build_source_capsules(articles)
+    operator_guidance = instructions or "Prioritize concrete, decision-useful signals for this flywheel group."
+    prompt = f"""Create a concise {cadence} StoryLab intelligence update from ONLY the source capsules below.
 
-    # TODO (added when the API key is wired up): send `instructions` +
-    # `source_capsules` to the OpenAI API via urllib.request (stdlib,
-    # same as the RSS fetcher), parse the response into summary_text /
-    # rationale_text, INSERT a row into ai_summaries, and return
-    # {"ok": True, "summary": {...same shape as get_latest_summary()...}}
-    # -- summaries.html's applySummary() already expects exactly that shape.
-    return {
-        "ok": False,
-        "error": "not_implemented",
-        "message": (
-            "API key detected, but the live AI call hasn't been built yet. "
-            f"Found {len(articles)} 5-star article(s) ready to summarize once it is."
-        ),
-    }
+FACT BOUNDARY: Do not introduce facts, numbers, named programs, causation, or outcomes not explicitly in the capsules. If evidence is thin or incomplete, say so plainly. Do not use general knowledge or web research. The source links will remain visible to the operator.
+
+    Write a 2-4 paragraph synthesis of what is newly visible in this evidence, plus a short operator-attention cue framed as a review cue rather than a recommendation or certainty.
+
+Flywheel group: {group}
+Operator guidance: {operator_guidance}
+
+SOURCE CAPSULES\n{source_capsules}"""
+    payload = json.dumps({
+        "model": OPENAI_SUMMARY_MODEL,
+        "store": False,
+        # This needs room for GPT-5 mini's reasoning tokens as well as the
+        # small structured answer; a too-small cap can yield an incomplete
+        # response with no output_text.
+        "max_output_tokens": 1400,
+        "reasoning": {"effort": "minimal"},
+        "instructions": "You are StoryLab's source-bounded intelligence editor. Follow the requested JSON schema exactly.",
+        "input": prompt,
+        "text": {"format": _summary_schema()},
+    }).encode("utf-8")
+    request = Request(OPENAI_RESPONSES_URL, data=payload, headers={
+        "Authorization": f"Bearer {os.environ['OPENAI_API_KEY']}",
+        "Content-Type": "application/json",
+    }, method="POST")
+    try:
+        with opener(request, timeout=45) as response:
+            response_body = json.loads(response.read().decode("utf-8"))
+        generated = json.loads(_response_output_text(response_body))
+        summary_text = (generated.get("summary_text") or "").strip()
+        rationale_text = (generated.get("rationale_text") or "").strip()
+        if not summary_text or not rationale_text:
+            raise ValueError("OpenAI returned an incomplete summary.")
+    except HTTPError as exc:
+        if exc.code == 401:
+            message = "OpenAI rejected the configured API key. Check OPENAI_API_KEY in .env."
+        elif exc.code == 429:
+            message = "OpenAI rate limit reached. Wait a moment, then try again."
+        else:
+            message = f"OpenAI could not generate the summary (HTTP {exc.code})."
+        return {"ok": False, "error": "openai_error", "message": message}
+    except (URLError, TimeoutError):
+        return {"ok": False, "error": "openai_unavailable", "message": "OpenAI could not be reached. Check your connection and try again."}
+    except ValueError as exc:
+        return {"ok": False, "error": "invalid_ai_response", "message": f"{exc} No summary was saved."}
+
+    dates = [article.get("published_date") or article.get("fetched_date") for article in articles]
+    generated_at = datetime.now(timezone.utc).isoformat()
+    ensure_ai_tables(conn)
+    conn.execute("""
+        INSERT INTO ai_summaries
+          (config, flywheel_group, generated_at, article_ids, summary_text, rationale_text,
+           cadence, window_start, window_end, model)
+        VALUES (?,?,?,?,?,?,?,?,?,?)
+    """, (config, group, generated_at, json.dumps([a["id"] for a in articles]), summary_text,
+          rationale_text, cadence, min((d for d in dates if d), default=None),
+          max((d for d in dates if d), default=None), OPENAI_SUMMARY_MODEL))
+    conn.commit()
+    return {"ok": True, "summary": get_latest_summary(conn, config, group, cadence), "article_count": len(articles)}

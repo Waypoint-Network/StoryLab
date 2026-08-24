@@ -2,10 +2,11 @@ import os
 import sqlite3
 import tempfile
 import unittest
+import json
 from unittest.mock import patch
 
 from core.aggregator import init_db
-from core.ai_summary import ensure_ai_tables, generate_flywheel_brief
+from core.ai_summary import ensure_ai_tables, generate_flywheel_brief, generate_summary
 from core.helm import (build_payload, create_signal_from_article, ensure_helm_tables,
                        get_signal, prepare_signals_from_approved_brief, publish_approved_brief, publish_signals,
                        save_signal, signal_external_id)
@@ -17,6 +18,14 @@ class FakeResponse:
     def __enter__(self): return self
     def __exit__(self, *args): return False
     def getcode(self): return self.status
+
+
+class FakeOpenAIResponse(FakeResponse):
+    def __init__(self, summary="Source-backed summary.", rationale="Review the cited source material."):
+        self.payload = json.dumps({"output": [{"content": [{"type": "output_text", "text": json.dumps({
+            "summary_text": summary, "rationale_text": rationale,
+        })}]}]}).encode("utf-8")
+    def read(self): return self.payload
 
 
 class HelmSignalTests(unittest.TestCase):
@@ -155,6 +164,29 @@ class HelmSignalTests(unittest.TestCase):
         self.assertTrue(later["ok"])
         self.assertEqual(len(later["brief"]["source_article_ids"]), 1)
         self.assertEqual(later["brief"]["new_source_article_ids"], later["brief"]["source_article_ids"])
+
+    @patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=False)
+    def test_daily_and_weekly_summaries_track_separate_new_source_histories(self):
+        opener = lambda req, timeout: FakeOpenAIResponse()
+        monday_daily = generate_summary(self.conn, "fan_atlas_insiders", "Institutional", "daily", opener=opener)
+        self.assertTrue(monday_daily["ok"])
+        self.assertEqual(monday_daily["article_count"], 1)
+        no_repeat = generate_summary(self.conn, "fan_atlas_insiders", "Institutional", "daily", opener=opener)
+        self.assertFalse(no_repeat["ok"])
+        self.assertEqual(no_repeat["error"], "no_new_articles")
+        weekly = generate_summary(self.conn, "fan_atlas_insiders", "Institutional", "weekly", opener=opener)
+        self.assertTrue(weekly["ok"])
+        self.assertEqual(weekly["article_count"], 1)
+        self.conn.execute("""INSERT INTO articles
+            (url_hash, source, category, title, url, summary, published_date, fetched_date, relevance_score, story_type, config)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?)""", ("ai-new-source", "New source", "nil_case_study", "A new source", "https://example.test/new-ai", "New factual RSS summary.", "2026-08-13T17:00:00Z", "2026-08-13T17:00:00Z", 5, "case-study", "fan_atlas_insiders"))
+        self.conn.commit()
+        tuesday_daily = generate_summary(self.conn, "fan_atlas_insiders", "Institutional", "daily", opener=opener)
+        self.assertTrue(tuesday_daily["ok"])
+        self.assertEqual(tuesday_daily["article_count"], 1)
+        next_weekly = generate_summary(self.conn, "fan_atlas_insiders", "Institutional", "weekly", opener=opener)
+        self.assertTrue(next_weekly["ok"])
+        self.assertEqual(next_weekly["article_count"], 1)
 
     @patch.dict(os.environ, {"HELM_STRATEGY_ENDPOINT": "https://waypoint-helm-v1.nateleigh.chatgpt.site/api/integrations/strategy-lab/signals", "HELM_STRATEGY_API_KEY": "test-secret"}, clear=False)
     def test_approved_brief_publishes_one_evidence_backed_signal(self):
