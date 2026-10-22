@@ -1,7 +1,7 @@
 # StoryLab — Python dependencies
 # Core engine uses stdlib only. Install these for optional enhancements.
 
-certifi          # SSL certificate bundle — improves feed compatibility
+certifi==2026.10.19  # SSL certificate bundle — includes the eMudhra trust update
 beautifulsoup4   # HTML parsing for richer summary extraction (optional)
 lxml             # Faster XML parser (optional, used by beautifulsoup4)
 psycopg2-binary  # PostgreSQL connector — Phase 2: longitude_sync.py
